@@ -1,5 +1,0 @@
-apiVersion: v2
-appVersion: 2.0.2
-description: Simpl Stubs helm chart
-name: simpl-stubs
-version: 2.0.2

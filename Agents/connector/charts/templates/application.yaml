@@ -29,9 +29,9 @@ spec:
     targetRevision: {{ .Values.values.branch }}
     ref: values
   # Redis
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.redis.path }}
+  - repoURL: oci://registry-1.docker.io/bitnamicharts
+    targetRevision: 19.6.0
+    chart: redis
     helm:
       valueFiles:
         {{- range .Values.redis.valueFiles }}
@@ -64,8 +64,8 @@ spec:
           {{- end }}
   {{- if .Values.redis_commander.enabled }}
   # Redis Commander
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
+  - repoURL: {{ .Values.redis_commander.repo_URL }}
+    targetRevision: {{ .Values.redis_commander.targetRevision }}
     path: {{ .Values.redis_commander.path }}
     helm:
       valueFiles:
@@ -349,9 +349,9 @@ spec:
         {{- end }}
   {{- if .Values.sdtooling_api_be.enabled }}
   # SD Tooling API BE
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.sdtooling_api_be.path }}
+  - repoURL: https://github.com/cnie-es/simpl-sdtooling-api-be.git
+    targetRevision: 1.25.0-edval
+    path: charts
     helm:
       valueFiles:
         {{- range .Values.sdtooling_api_be.valueFiles }}
@@ -430,9 +430,9 @@ spec:
   {{- end }}
   {{- if .Values.sdtooling_validation_api_be.enabled }}
   # SD Tooling Validation API BE
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.sdtooling_validation_api_be.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/868/packages/helm/stable
+    targetRevision: 1.21.0
+    chart: sd-creation-wizard
     helm:
       values: |
         image:
@@ -459,9 +459,9 @@ spec:
   {{- end }}
   {{- if .Values.xfsc_advsearch_be.enabled }}
   # XFSC Advanced Search BE
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.xfsc_advsearch_be.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/891/packages/helm/stable
+    targetRevision: 1.26.0
+    chart: xfsc-advsearch
     helm:
       valueFiles:
         {{- range .Values.xfsc_advsearch_be.valueFiles }}
@@ -494,8 +494,9 @@ spec:
   {{- end }}
   {{- if .Values.contract_consumption_be.enabled }}
   # Contract Consumption BE (capacidad de consumo del Agente hibrido)
-  - repoURL: {{ .Values.values.repo_URL }}
-    path: {{ .Values.contract_consumption_be.path }}
+  - repoURL: https://github.com/cnie-es/simpl-contract-consumption-be.git
+    targetRevision: 1.20.2-edval
+    path: charts
     targetRevision: {{ .Values.values.branch }}
     helm:
       valueFiles:
@@ -534,9 +535,9 @@ spec:
   {{- end }}
   {{- if .Values.signer.enabled }}
   # Signer
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.signer.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/2111/packages/helm/stable
+    targetRevision: 0.1.0
+    chart: signer
     helm:
       valueFiles:
         {{- range .Values.signer.valueFiles }}
@@ -564,9 +565,9 @@ spec:
   {{- end }}
   {{- if .Values.simpl_catalogue_client.enabled }}
   # Simpl Catalogue Client
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.simpl_catalogue_client.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/937/packages/helm/stable
+    targetRevision: 2.9.0
+    chart: catalogue-ui
     helm:
       valueFiles:
         {{- range .Values.simpl_catalogue_client.valueFiles }}
@@ -613,9 +614,9 @@ spec:
         {{- end }}
   {{- end }}
   # Tier 1 Gateway
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.tier1_gateway.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/772/packages/helm/stable
+    targetRevision: 2.16.0-rc.1379
+    chart: tier1-gateway
     helm:
       valueFiles:
         {{- range .Values.tier1_gateway.valueFiles }}
@@ -672,9 +673,9 @@ spec:
           {{- end }}
         {{- end }}
   # Users Roles
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.users_roles.path }}
+  - repoURL: https://github.com/cnie-es/simpl-users-roles.git
+    targetRevision: 2.11.1-edval
+    path: charts
     helm:
       valueFiles:
         {{- range .Values.users_roles.valueFiles }}
@@ -752,9 +753,9 @@ spec:
           {{- end }}
         {{- end }}
   # Users Roles FE
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.users_roles_fe.path }}
+  - repoURL: https://github.com/cnie-es/simpl-fe-users-and-roles.git
+    targetRevision: ednel-v1.0.2
+    path: charts
     helm:
       {{- if .Values.users_roles_fe.valueFiles }}
       valueFiles:
@@ -799,9 +800,9 @@ spec:
           {{- end }}
         {{- end }}
   # Tier 2 Gateway
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.tier2_gateway.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/860/packages/helm/stable
+    targetRevision: 2.13.0-rc.1242
+    chart: tier2-gateway
     helm:
       valueFiles:
         {{- range .Values.tier2_gateway.valueFiles }}
@@ -874,9 +875,9 @@ spec:
           {{- end }}
         {{- end }}
   # Tier 2 Proxy
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.tier2_proxy.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/1112/packages/helm/stable
+    targetRevision: 1.7.0-rc.490
+    chart: tier2-proxy
     helm:
       {{- if .Values.tier2_proxy.valueFiles }}
       valueFiles:
@@ -899,9 +900,9 @@ spec:
           {{- end }}
         {{- end }}
   # Authentication Provider
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.auth_provider.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/2223/packages/helm/stable
+    targetRevision: 3.0.3
+    chart: authentication-provider-be
     helm:
       valueFiles:
         {{- range .Values.auth_provider.valueFiles }}
@@ -993,9 +994,9 @@ spec:
           {{- end }}
         {{- end }}
   # Authentication Provider FE
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.auth_provider_fe.path }}
+  - repoURL: https://github.com/cnie-es/simpl-fe-authentication-provider.git
+    targetRevision: ednel-v1.0.2
+    path: charts
     helm:
       {{- if .Values.auth_provider_fe.valueFiles }}
       valueFiles:
@@ -1041,9 +1042,9 @@ spec:
         {{- end }}
   {{- if .Values.sd_ui.enabled }}
   # SD UI
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.sd_ui.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/923/packages/helm/stable
+    targetRevision: 1.16.0
+    chart: sd-ui
     helm:
       valueFiles:
         {{- range .Values.sd_ui.valueFiles }}
@@ -1090,9 +1091,9 @@ spec:
   {{- end }}
   {{- if .Values.data_dashboard.enabled }}
   # Data Dashboard
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.data_dashboard.path }}
+  - repoURL: https://github.com/cnie-es/edc-data-dashboard.git
+    targetRevision: v1.0.5-edval
+    path: charts
     helm:
       valueFiles:
         {{- range .Values.data_dashboard.valueFiles }}
@@ -1159,9 +1160,9 @@ spec:
   {{- end }}
   {{- if .Values.simpl_edc.enabled }}
   # Simpl EDC
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.simpl_edc.path }}
+  - repoURL: https://github.com/cnie-es/simpl-edc.git
+    targetRevision: 1.0.21-edval
+    path: charts
     helm:
       releaseName: {{ .Values.simpl_edc.nameOverride }}
       valueFiles:
@@ -1207,9 +1208,9 @@ spec:
   {{- if .Values.simpl_edc_consumer.enabled }}
   # Simpl EDC (perfil consumer) - 2a instancia para el Agente hibrido.
   # Service simpl-edc-consumer-service (29xxx); DB propia <ns>_edc_consumer; mismo participante.
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.simpl_edc_consumer.path }}
+  - repoURL: https://github.com/cnie-es/simpl-edc.git
+    targetRevision: 1.0.21-edval
+    path: charts
     helm:
       releaseName: {{ .Values.simpl_edc_consumer.nameOverride }}
       valueFiles:
@@ -1252,9 +1253,9 @@ spec:
   {{- end }}
   {{- if .Values.edc_connector_adapter.enabled }}
   # EDC Connector Adapter
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.edc_connector_adapter.path }}
+  - repoURL: https://github.com/cnie-es/simpl-edc-connector-adapter.git
+    targetRevision: 1.14.0-edval
+    path: charts
     helm:
       releaseName: {{ .Values.edc_connector_adapter.nameOverride }}
       valueFiles:
@@ -1295,8 +1296,9 @@ spec:
   {{- if .Values.edc_connector_adapter_consumer.enabled }}
   # EDC Connector Adapter (perfil consumer) - 2a instancia para el Agente hibrido.
   # Publica los topics contract_consumption.* que consume contract-consumption-be.
-  - repoURL: {{ .Values.values.repo_URL }}
-    path: {{ .Values.edc_connector_adapter_consumer.path }}
+  - repoURL: https://github.com/cnie-es/simpl-edc-connector-adapter.git
+    targetRevision: 1.14.0-edval
+    path: charts
     targetRevision: {{ .Values.values.branch }}
     helm:
       releaseName: {{ .Values.edc_connector_adapter_consumer.nameOverride }}
@@ -1377,9 +1379,9 @@ spec:
   {{- end }}
   {{- if .Values.monitoring.enabled }}
   # Monitoring
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.monitoring.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/828/packages/helm/stable
+    targetRevision: 0.10.0
+    chart: eck-monitoring
     helm:
       releaseName: {{ .Values.monitoring.fullnameOverride }}
       valueFiles:
@@ -1422,9 +1424,9 @@ spec:
           {{- end }}
   {{- end }}
   # Contract
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.contract.path }}
+  - repoURL: https://github.com/cnie-es/simpl-contract.git
+    targetRevision: 2.9.0-edval
+    path: charts
     helm:
       releaseName: {{ .Values.contract.fullnameOverride }}
       valueFiles:
@@ -1482,9 +1484,9 @@ spec:
   {{- if .Values.contract_consumer.enabled }}
   # Contract Manager BE (modo CONSUMER) - 2a instancia para el Agente hibrido.
   # DB y credenciales propias (<ns>_contract_consumer); topics separados por modo (-consumer).
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.contract_consumer.path }}
+  - repoURL: https://github.com/cnie-es/simpl-contract.git
+    targetRevision: 2.9.0-edval
+    path: charts
     helm:
       releaseName: {{ .Values.contract_consumer.fullnameOverride }}
       valueFiles:
@@ -1551,9 +1553,9 @@ spec:
         {{- end }}
   {{- end }}
   # Stubs
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.stubs.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/2052/packages/helm/stable
+    targetRevision: 2.9.0
+    chart: simpl-stubs
     helm:
       valueFiles:
         {{- range .Values.stubs.valueFiles }}
@@ -1565,9 +1567,9 @@ spec:
           tag: {{ .Values.imagesTags.stubs }}
   {{- if .Values.files.enabled }}
   # Files
-  - repoURL: {{ .Values.values.repo_URL }}
-    targetRevision: {{ .Values.values.branch }}
-    path: {{ .Values.files.path }}
+  - repoURL: https://code.europa.eu/api/v4/projects/978/packages/helm/stable
+    targetRevision: 1.4.0
+    chart: simpl-files
     helm:
       valueFiles:
         {{- range .Values.files.valueFiles }}

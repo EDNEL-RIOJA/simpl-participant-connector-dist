@@ -1,6 +1,0 @@
-apiVersion: v2
-appVersion: 2.3.2
-description: A Helm chart for Kubernetes
-name: catalogue-ui
-type: application
-version: 2.3.2

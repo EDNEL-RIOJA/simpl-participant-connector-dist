@@ -1,5 +1,0 @@
-apiVersion: v1
-appVersion: 1.2.0
-description: Web Server Storage Files
-name: simpl-files
-version: 1.2.0

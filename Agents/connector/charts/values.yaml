@@ -196,7 +196,7 @@ keycloak:
     firstName: Admin
     lastName: Dataprovider
     email: admin.dataprovider@email.com
-  path: external/keycloak
+  path: Agents/connector/external/keycloak
   chart_name: keycloak
   targetRevision: 22.2.5
   nameOverride: keycloak
@@ -615,7 +615,7 @@ chIngest:
   caSecret: ch-ingest-mtls-ca
 observability:
   enabled: true
-  path: Monitoring/observability
+  path: Agents/connector/external/observability
   chart_name: observability
   fullnameOverride: observability
   valueFiles:

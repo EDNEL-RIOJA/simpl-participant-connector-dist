@@ -1,7 +1,0 @@
-[
-  { "role": "SD_CONSUMER",  "identityAttributes": ["DATA_SEARCHER", "EDVAL_PARTICIPANT"] },
-  { "role": "SD_PUBLISHER", "identityAttributes": ["DATA_PROVIDER_PUBLISHER", "EDVAL_PARTICIPANT"] },
-  { "role": "CATALOG_R",    "identityAttributes": ["DATA_SEARCHER", "EDVAL_PARTICIPANT"] },
-  { "role": "Ro-MU-A",      "identityAttributes": ["DATA_PROVIDER_PUBLISHER", "EDVAL_PARTICIPANT"] },
-  { "role": "Ro-Pa-A",      "identityAttributes": ["DATA_PROVIDER_PUBLISHER", "EDVAL_PARTICIPANT"] }
-]

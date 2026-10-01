@@ -1,6 +1,0 @@
-apiVersion: v2
-appVersion: 2.11.1
-description: A Helm chart for Kubernetes
-name: users-roles
-type: application
-version: 2.11.1

@@ -1,6 +1,0 @@
-apiVersion: v2
-appVersion: 2.9.0
-description: A Helm chart for Kubernetes
-name: authentication-provider
-type: application
-version: 2.9.0

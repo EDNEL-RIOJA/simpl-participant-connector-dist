@@ -1,6 +1,0 @@
-apiVersion: v2
-appVersion: 2.10.0
-description: A Helm chart for Kubernetes
-name: tier2-gateway
-type: application
-version: 2.10.0
