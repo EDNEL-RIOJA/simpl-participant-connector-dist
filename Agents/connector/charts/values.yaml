@@ -74,7 +74,7 @@ openbao:
       cpu: '0'
       memory: '0'
 openbao_init:
-  path: openbao-init/charts
+  path: vendor/openbao-init/charts
   repo_URL: https://github.com/cnie-es/edval-conector.git
   targetRevision: v3.1.8-test.11
   chart_name: openbao-init
@@ -105,7 +105,7 @@ confluent_operator:
 kafka:
   ha: false
   repo_URL: https://github.com/cnie-es/edval-conector.git
-  path: kafka/charts
+  path: vendor/kafka/charts
   targetRevision: v3.1.8-test.11
   chart_name: kafka
   image:
@@ -196,7 +196,7 @@ keycloak:
     firstName: Admin
     lastName: Dataprovider
     email: admin.dataprovider@email.com
-  path: Agents/connector/external/keycloak
+  path: vendor/keycloak
   chart_name: keycloak
   targetRevision: 22.2.5
   nameOverride: keycloak
@@ -593,7 +593,7 @@ pg_operator:
     tag: v1.15.1
 pg_cluster:
   repo_URL: https://github.com/cnie-es/edval-conector.git
-  path: postgres-cluster/charts
+  path: vendor/postgres-cluster/charts
   targetRevision: v3.1.8-test.11
   volumeSize: 20Gi
   storageClass: ''
@@ -615,7 +615,7 @@ chIngest:
   caSecret: ch-ingest-mtls-ca
 observability:
   enabled: true
-  path: Agents/connector/external/observability
+  path: vendor/observability
   chart_name: observability
   fullnameOverride: observability
   valueFiles:
@@ -624,7 +624,7 @@ signerTokenRefresh:
   enabled: false
   schedule: 0 3 * * *
   deploymentName: signer
-  image: ghcr.io/cnie-es/alpine-kubectl:1.35.2
+  image: docker.io/rancher/kubectl:v1.35.2
 adminRealmAccess: public
 adminHost: ''
 adminIngressTarget: ''

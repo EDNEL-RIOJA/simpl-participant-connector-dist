@@ -23,7 +23,7 @@ server:
     tag: "2.5.1"
   initContainers:
     - name: final-step
-      image: ghcr.io/cnie-es/library-busybox:1.37.0
+      image: docker.io/library/busybox:1.37.0
   ingress:
     ingressClassName: apisix
     enabled: true

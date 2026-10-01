@@ -1,6 +1,11 @@
+# El chart publico (oci://registry-1.docker.io/bitnamicharts/redis) trae por defecto
+# docker.io/bitnami/redis, pero Broadcom cerro el catalogo gratuito de Bitnami en 2025 y
+# ese tag ya no existe ahi -- solo sigue vivo en el archivo congelado bitnamilegacy/*
+# (verificado con skopeo). Sin este override el pod no arranca (ImagePullBackOff).
 image:
-  repository: ghcr.io/cnie-es/redis
-  tag: 7.2
+  registry: docker.io
+  repository: bitnamilegacy/redis
+  tag: 7.2.5-debian-12-r0
 
 replica:
   replicaCount: 0
@@ -28,10 +33,14 @@ auth:
 # Sin esto el pod de redis corre con UN solo contenedor y no hay ninguna serie que
 # consultar: la alerta existe pero no puede dispararse nunca.
 #
-# La imagen ya esta espejada en Harbor (metrics.image del subchart apunta a
-# ghcr.io/cnie-es/redis-exporter), asi que no hace falta tocar nada mas.
+# Mismo problema que el image: de arriba -- el default publico del subchart
+# (docker.io/bitnami/redis-exporter) ya no existe, solo sigue vivo en bitnamilegacy/*.
 metrics:
   enabled: true
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/redis-exporter
+    tag: 1.61.0-debian-12-r0
   resources:
     requests:
       cpu: 25m

@@ -32,7 +32,7 @@ spec:
   sources:
   - repoURL: {{ .Values.values.repo_URL }}
     targetRevision: {{ .Values.values.branch }}
-    path: Agents/connector/external/openbao-seeder
+    path: vendor/openbao-seeder
     helm:
       values: |
         namespace: {{ .Values.cluster.namespace }}

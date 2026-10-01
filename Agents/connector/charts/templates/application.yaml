@@ -46,7 +46,7 @@ spec:
             vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
             {{- end }}
             vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-            vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+            vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
             # Reinicia este pod cuando rote la password de Redis; ver connector.redisSecretChecksum.
             checksum/redis-secret: {{ include "connector.redisSecretChecksum" $ }}
           {{- if .Values.redis.resourcesPreset }}
@@ -118,7 +118,7 @@ spec:
           vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
           {{- end }}
           vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
         auth:
           adminPassword: vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-keycloak#admin
         externalDatabase:
@@ -140,7 +140,7 @@ spec:
             tlsSecret: {{ . }}
             {{- end }}
             role: {{ .Values.secrets.role }}
-            envImage: "ghcr.io/cnie-es/vault-env:1.22.1"
+            envImage: "ghcr.io/bank-vaults/vault-env:v1.22.1"
           {{- if eq (.Values.adminRealmAccess | default "public") "internal" }}
           # adminRealmAccess=internal: el realm master se sirve en el host interno. Sin
           # esto la consola se SIRVE en adminHost pero se AUTENTICA contra el host
@@ -228,7 +228,7 @@ spec:
           value: "https://vallelengua.es"
         initContainers:
         - name: download-realm
-          image: ghcr.io/cnie-es/curlimages-curl:8.18.0
+          image: docker.io/curlimages/curl:8.18.0
           command: ["/bin/sh", "-c"]
           env:
             {{- with .Values.configFiles.tokenRef }}
@@ -245,7 +245,7 @@ spec:
             - name: realm-config-volume
               mountPath: /realm-template
         - name: import-realm
-          image: ghcr.io/cnie-es/nginx:1.0.0
+          image: docker.io/library/nginx:1.27-alpine
           command: ["/bin/sh", "-c"]
           env:
             - name: REDIRECT_URIS
@@ -301,7 +301,7 @@ spec:
             - name: realm-volume
               mountPath: /config
         - name: init-spi
-          image: ghcr.io/cnie-es/curlimages-curl:8.18.0
+          image: docker.io/curlimages/curl:8.18.0
           command: ["/bin/sh", "-c"]
           env:
             {{- with .Values.configFiles.tokenRef }}
@@ -318,7 +318,7 @@ spec:
           - name: spi-volume
             mountPath: /custom-spi
         - name: init-theme
-          image: ghcr.io/cnie-es/curlimages-curl:8.18.0
+          image: docker.io/curlimages/curl:8.18.0
           command: ["/bin/sh", "-c"]
           env:
             {{- with .Values.configFiles.tokenRef }}
@@ -688,7 +688,7 @@ spec:
           vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
           {{- end }}
           vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
         hostT1: participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
         image:
           registry: ghcr.io/cnie-es
@@ -815,7 +815,7 @@ spec:
           vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
           {{- end }}
           vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
           # Reinicia este pod cuando rote la password de Redis; ver connector.redisSecretChecksum.
           checksum/redis-secret: {{ include "connector.redisSecretChecksum" $ }}
         image:
@@ -922,7 +922,7 @@ spec:
           vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
           {{- end }}
           vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
           # Reinicia este pod cuando rote la password de Redis; ver connector.redisSecretChecksum.
           checksum/redis-secret: {{ include "connector.redisSecretChecksum" $ }}
         image:
@@ -1440,7 +1440,7 @@ spec:
           vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
           {{- end }}
           vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
         deployment:
           image:
             registry: ghcr.io/cnie-es
@@ -1500,7 +1500,7 @@ spec:
           vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
           {{- end }}
           vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
         deployment:
           image:
             registry: ghcr.io/cnie-es
@@ -1624,7 +1624,7 @@ spec:
                   vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
                   {{- end }}
                   vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-                  vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+                  vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
                 location_name: field_level_pseudo_anonymisation
                 enabled: true
                 enableSubchart: true
@@ -1668,7 +1668,7 @@ spec:
                   vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
                   {{- end }}
                   vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-                  vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+                  vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
                 location_name: dataframe_level_anonymisation
                 enabled: true
                 enableSubchart: true
@@ -1712,7 +1712,7 @@ spec:
               vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
               {{- end }}
               vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-              vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+              vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
           postgresql:
             postgresqlHost: "pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local"
             postgresqlUsername: "{{ .Values.cluster.namespace }}_dagster"
@@ -1730,7 +1730,7 @@ spec:
               vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
               {{- end }}
               vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-              vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+              vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
   {{- end }}
   # crossplane # infrastructure-be
   {{- if .Values.crossplane.enabled }}
@@ -1758,7 +1758,7 @@ spec:
             vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
             {{- end }}
             vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
-            vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+            vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
             vault.security.banzaicloud.io/vault-ignore-missing-secrets: "true"
           env:
             ALLOWED_ORIGINS: http://localhost:3001,https://{{ .Values.infrastructure_fe.fullnameOverride }}-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }},https://sd-ui-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}

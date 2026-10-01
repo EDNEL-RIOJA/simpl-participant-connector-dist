@@ -21,7 +21,7 @@ spec:
     annotations:
       {{- if and .Values.kafka.auth.enabled (eq .Values.kafka.auth.secretMethod "vault") }}
       vault.hashicorp.com/agent-inject: "true"
-      vault.hashicorp.com/agent-image: "ghcr.io/cnie-es/openbao:2.4.3"
+      vault.hashicorp.com/agent-image: "docker.io/openbao/openbao:2.4.3"
       vault.hashicorp.com/role: {{ .Values.hashicorp.role }}
       {{- if and (hasKey .Values "hashicorp") (hasKey .Values.hashicorp "service") }}
       vault.hashicorp.com/service: {{ .Values.hashicorp.service }}

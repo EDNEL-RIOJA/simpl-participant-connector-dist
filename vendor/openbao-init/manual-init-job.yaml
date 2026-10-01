@@ -1,21 +1,26 @@
+# Manual OpenBao Initialization Job
+# Usage: kubectl apply -f manual-init-job.yaml -n <namespace>
+# This job performs the initial OpenBao setup when needed manually
+
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: openbao-init
+  name: openbao-init-manual
+  namespace: simplcommon  # Change this to your target namespace
 spec:
   template:
     spec:
-      serviceAccountName: openbao-{{ .Values.cluster.namespace }}-svc-account
+      serviceAccountName: openbao-simplcommon-svc-account  # Change simpl-common to your namespace
       imagePullSecrets:
         - name: github-registry-secret
       initContainers:
       - name: 0-init
-        image: "ghcr.io/cnie-es/openbao:2.4.3"
+        image: "docker.io/openbao/openbao:2.4.3"
         command: [sh, -c]
         args:
           - |
-            # Use internal service name for connectivity check
-            until wget -O /dev/null --quiet --timeout=10 --tries=1 --no-check-certificate http://openbao-{{ .Values.cluster.namespace }}:8200/v1/sys/seal-status 2>/dev/null; do
+            # Use seal-status endpoint with GET instead of spider (HEAD)
+            until wget -O /dev/null --quiet --timeout=10 --tries=1 --no-check-certificate $VAULT_ADDR/v1/sys/seal-status 2>/dev/null; do
               echo "Waiting for OpenBao to be accessible..."
               sleep 5
             done
@@ -25,14 +30,14 @@ spec:
             }
         env:
           - name: VAULT_ADDR
-            value: https://secrets-{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}
+            value: http://openbao-simplcommon:8200  # Change simpl-common to your namespace
           - name: VAULT_SKIP_VERIFY
             value: "true"
         volumeMounts:
         - name: init-bao-volume
           mountPath: /data
       - name: 1-bao-secret
-        image: "ghcr.io/cnie-es/alpine-kubectl:1.35.2"
+        image: "docker.io/rancher/kubectl:v1.35.2"
         command: [sh, -c]
         args:
           - |
@@ -59,11 +64,10 @@ spec:
         volumeMounts:
         - name: init-bao-volume
           mountPath: /data
-      # 2-unseal container removed - using transit auto-unseal instead
       containers:
       - name: final-step
-        image: ghcr.io/cnie-es/library-busybox:1.37.0
-        command: ['sh', '-c', 'echo "Final step: End the process"']
+        image: docker.io/library/busybox:1.37.0
+        command: ['sh', '-c', 'echo "Manual initialization complete"']
         volumeMounts:
         - name: init-bao-volume
           mountPath: /data
@@ -71,4 +75,4 @@ spec:
       volumes:
       - name: init-bao-volume
         persistentVolumeClaim:
-          claimName: init-bao-{{ .Values.cluster.namespace }}-pvc
+          claimName: init-bao-simplcommon-pvc  # Change simpl-common to your namespace

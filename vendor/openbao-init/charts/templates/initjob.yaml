@@ -21,7 +21,7 @@ spec:
             - name: github-registry-secret
           initContainers:
           - name: 0-init
-            image: "ghcr.io/cnie-es/openbao:2.4.3"
+            image: "docker.io/openbao/openbao:2.4.3"
             command: [sh, -c]
             args:
               - |
@@ -66,7 +66,7 @@ spec:
             - name: init-bao-volume
               mountPath: /data
           - name: 1-bao-secret
-            image: "ghcr.io/cnie-es/alpine-kubectl:1.35.2"
+            image: "docker.io/rancher/kubectl:v1.35.2"
             command: [sh, -c]
             args:
               - |
@@ -107,7 +107,7 @@ spec:
             - name: init-bao-volume
               mountPath: /data
           - name: 2-unseal
-            image: "ghcr.io/cnie-es/openbao:2.4.3"
+            image: "docker.io/openbao/openbao:2.4.3"
             command: [sh, -c]
             args:
               - |
@@ -159,7 +159,7 @@ spec:
               mountPath: /data
               readOnly: true
           - name: 3-kv-secretengine
-            image: "ghcr.io/cnie-es/openbao:2.4.3"
+            image: "docker.io/openbao/openbao:2.4.3"
             command: [sh, -c]
             args:
               - |
@@ -174,7 +174,7 @@ spec:
               - name: VAULT_ADDR
                 value: http://openbao-{{ .Values.cluster.namespace }}:8200
           - name: 4-transit-secretengine
-            image: "ghcr.io/cnie-es/openbao:2.4.3"
+            image: "docker.io/openbao/openbao:2.4.3"
             command: [sh, -c]
             args:
               - |
@@ -189,7 +189,7 @@ spec:
               - name: VAULT_ADDR
                 value: http://openbao-{{ .Values.cluster.namespace }}:8200
           - name: 5-kubernetes-policy-role
-            image: "ghcr.io/cnie-es/openbao:2.4.3"
+            image: "docker.io/openbao/openbao:2.4.3"
             command: [sh, -c]
             args:
               - |
@@ -285,7 +285,7 @@ spec:
               mountPath: /var/run/secrets/openbao-sa
               readOnly: true
           - name: 6-common-secrets
-            image: "ghcr.io/cnie-es/openbao:2.4.3"
+            image: "docker.io/openbao/openbao:2.4.3"
             command: [sh, -c]
             args:
               - |
@@ -417,7 +417,7 @@ spec:
                     key: ca.crt
                     optional: true
           - name: 7-sync-kafka-users-secret
-            image: "ghcr.io/cnie-es/alpine-kubectl:1.35.2"
+            image: "docker.io/rancher/kubectl:v1.35.2"
             command: [sh, -c]
             args:
               - |
@@ -446,7 +446,7 @@ spec:
           # changed. The restart is fire-and-forget so PostSync stays fast;
           # kafka rolls in the background.
           - name: 7b-rollout-kafka-on-change
-            image: "ghcr.io/cnie-es/alpine-kubectl:1.35.2"
+            image: "docker.io/rancher/kubectl:v1.35.2"
             command: [sh, -c]
             args:
               - |
@@ -473,7 +473,7 @@ spec:
                   --dry-run=client -o yaml | kubectl apply -f -
                 echo "kafka restart triggered; not waiting for completion"
           - name: 8-sync-redis-secrets
-            image: "ghcr.io/cnie-es/alpine-kubectl:1.35.2"
+            image: "docker.io/rancher/kubectl:v1.35.2"
             command: [sh, -c]
             args:
               - |
@@ -517,7 +517,7 @@ spec:
           # Because the K8s Secret is no longer rendered by Helm, it never
           # rotates on every reconcile.
           - name: 9-sync-mailpit-secrets
-            image: "ghcr.io/cnie-es/alpine-kubectl:1.35.2"
+            image: "docker.io/rancher/kubectl:v1.35.2"
             command: [sh, -c]
             args:
               - |
@@ -580,7 +580,7 @@ spec:
                 echo "mailpit-secrets synchronised from OpenBao"
           {{- end }}
           - name: 9-github-token
-            image: "ghcr.io/cnie-es/openbao:2.4.3"
+            image: "docker.io/openbao/openbao:2.4.3"
             command: [sh, -c]
             args:
               - |
@@ -604,7 +604,7 @@ spec:
                     key: token
           {{- range .Values.agentList.authorities }}
           - name: 6-authority-secrets-{{ . }}
-            image: "ghcr.io/cnie-es/openbao:2.4.3"
+            image: "docker.io/openbao/openbao:2.4.3"
             command: [sh, -c]
             args:
               - |
@@ -873,7 +873,7 @@ spec:
           {{- end }}
           {{- range .Values.agentList.providers }}
           - name: 6-provider-secrets-{{ . }}
-            image: "ghcr.io/cnie-es/openbao:2.4.3"
+            image: "docker.io/openbao/openbao:2.4.3"
             command: [sh, -c]
             args:
               - |
@@ -1014,7 +1014,7 @@ spec:
           {{- end }}
           {{- range .Values.agentList.consumers }}
           - name: 6-consumer-secrets-{{ . }}
-            image: "ghcr.io/cnie-es/openbao:2.4.3"
+            image: "docker.io/openbao/openbao:2.4.3"
             command: [sh, -c]
             args:
               - |
@@ -1130,7 +1130,7 @@ spec:
           {{- end }}
           containers:
           - name: final-step
-            image: ghcr.io/cnie-es/library-busybox:1.37.0
+            image: docker.io/library/busybox:1.37.0
             command: ['sh', '-c', 'echo "Final step: End the process"']
             volumeMounts:
             - name: init-bao-volume
