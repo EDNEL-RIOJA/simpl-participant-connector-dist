@@ -20,7 +20,7 @@ spec:
         - name: {{ .Values.imagePullSecretName }}
       containers:
       - name: seeder
-        image: ghcr.io/cnie-es/openbao:2.4.3
+        image: docker.io/openbao/openbao:2.4.3
         command: [sh, -c]
         args:
           - |

@@ -91,14 +91,14 @@ usePasswordFiles: true
 ## @param image.debug Enable Keycloak image debug mode
 ##
 image:
-  # Mirror ghcr de EDNEL. Chart 25.2.0 (appVersion 26.3.3) pero imagen 26.3.2-r2: 26.3.3 solo
-  # existe como r0 con regresiones (bitnami/containers#86091); el chart solo plantilla config.
-  # c1/on-prem: Harbor (ghcr no accesible desde c1). registry+repository separados (patron
-  # bitnami) que el replace de ruta combinada no cubrio -> initContainer prepare-write-dirs
-  # quedaba en ImagePullBackOff (401 ghcr).
-  registry: ghcr.io/cnie-es
-  repository: keycloak
-  tag: 26.3.2-debian-12-r2
+  # Imagen oficial del proyecto Keycloak (no la de Bitnami: este chart es propio, solo
+  # reutiliza postgresql/common de Bitnami como subcharts, nunca el chart keycloak en si
+  # -- ver el StatefulSet/Job propios en templates/). La nota de regresion
+  # bitnami/containers#86091 (26.3.3 solo como r0) era especifica del empaquetado de
+  # Bitnami y ya no aplica aqui; 26.3.2 esta confirmado disponible en quay.io/keycloak.
+  registry: quay.io
+  repository: keycloak/keycloak
+  tag: "26.3.2"
   digest: ""
   ## Specify a imagePullPolicy
   ## ref: https://kubernetes.io/docs/concepts/containers/images/#pre-pulled-images
@@ -1006,9 +1006,9 @@ keycloakConfigCli:
   ## @param keycloakConfigCli.image.pullSecrets keycloak-config-cli container image pull secrets
   ##
   image:
-    registry: ghcr.io
-    repository: cnie-es/keycloak-config-cli
-    tag: 6.4.0-debian-12-r11
+    registry: docker.io
+    repository: adorsys/keycloak-config-cli
+    tag: 6.4.0-26
     digest: ""
     ## Specify a imagePullPolicy
     ## ref: https://kubernetes.io/docs/concepts/containers/images/#pre-pulled-images
@@ -1302,7 +1302,7 @@ externalDatabase:
 ## EDNEL custom: post-import realm hardening Job (plantilla templates/realm-hardening-job.yaml)
 realmHardening:
   enabled: false
-  image: ghcr.io/cnie-es/keycloak:26.3.2-debian-12-r2
+  image: quay.io/keycloak/keycloak:26.3.2
   imagePullPolicy: IfNotPresent
   backoffLimit: 5
   ttlSecondsAfterFinished: 600
@@ -1326,7 +1326,7 @@ realmHardening:
     role: ""
     # Secret (clave ca.crt) con la CA del endpoint de OpenBao. Vacio = CA publica.
     tlsSecret: ""
-    envImage: "ghcr.io/cnie-es/vault-env:1.22.1"
+    envImage: "ghcr.io/bank-vaults/vault-env:v1.22.1"
 # Capa 1 del aislamiento del realm master: cierra /auth/admin/* y
 # /auth/realms/master/* en el host PUBLICO del participante. Apagado por
 # defecto -> los participantes externos no se ven afectados. Lo enciende el

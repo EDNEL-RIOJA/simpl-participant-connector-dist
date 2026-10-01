@@ -72,7 +72,7 @@ spec:
         - name: github-registry-secret
       containers:
         - name: logstash
-          image: {{ .Values.chIngest.image | default "ghcr.io/cnie-es/logstash-logstash:9.4.1" }}
+          image: {{ .Values.chIngest.image | default "docker.elastic.co/logstash/logstash:9.4.1" }}
           env:
             - name: KAFKA_PASS
               valueFrom:
