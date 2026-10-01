@@ -1,0 +1,37 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: simpl-ingress
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    k8s.apisix.apache.org/proxy-read-timeout: "3600"
+    k8s.apisix.apache.org/proxy-send-timeout: "3600"
+    {{- if and .Values.ingress.issuer (not (.Values.ingress.tls | default dict).secretName) }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.issuer }}
+    cert-manager.io/renew-before: "720h"
+    {{- end }}
+    {{- if .Values.cors.allowOrigin }}
+    k8s.apisix.apache.org/enable-cors: "true"
+    k8s.apisix.apache.org/cors-allow-origin: {{ tpl .Values.cors.allowOrigin . | trim | quote }}
+    k8s.apisix.apache.org/cors-allow-methods: "GET, POST, OPTIONS, PUT, DELETE, PATCH"
+    k8s.apisix.apache.org/cors-allow-headers: {{ .Values.cors.allowedHeaders | trim | quote }}
+    k8s.apisix.apache.org/cors-max-age: "86400"
+    {{- end }}
+    k8s.apisix.apache.org/cors-allow-credentials: "true"
+spec:
+  ingressClassName: apisix
+  tls:
+    - hosts:
+        - {{ tpl .Values.hostT1 . }}
+      secretName: {{ (.Values.ingress.tls | default dict).secretName | default (printf "%s-cert" (tpl .Values.hostT1 .)) }}
+  rules:
+    - host: {{ tpl .Values.hostT1 . }}
+      http:
+        paths:
+          - path: /*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ .Chart.Name }}
+                port:
+                  number: 9000

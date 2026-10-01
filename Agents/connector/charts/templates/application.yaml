@@ -1,0 +1,1854 @@
+{{- if eq (.Values.adminRealmAccess | default "public") "internal" }}
+  {{- if not .Values.adminHost }}
+    {{- fail "adminRealmAccess=internal exige adminHost (host de example.invalid para la consola de Keycloak del participante)" }}
+  {{- end }}
+  {{- if not .Values.adminIngressTarget }}
+    {{- fail "adminRealmAccess=internal exige adminIngressTarget (IP del LB interno de vlan123 para external-dns)" }}
+  {{- end }}
+{{- end }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ .Values.argocd.appname }}
+  namespace: {{ .Values.argocd.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  syncPolicy:
+    automated: {}
+    syncOptions:
+      - ApplyOutOfSyncOnly=true
+      - CreateNamespace=true
+      - ServerSideApply=true
+  project: {{ .Values.project }}
+  destination:
+    server: {{ .Values.cluster.address }}
+    namespace: {{ .Values.cluster.namespace }}
+  sources:
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    ref: values
+  # Redis
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.redis.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.redis.valueFiles }}
+        - $values/Agents/connector/app-values/Redis/{{ . }}
+        {{- end }}
+      values: |
+        fullnameOverride: {{ .Values.redis.nameOverride }}
+        master:
+          podAnnotations:
+            vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+            {{- with include "connector.vaultCaSecret" $ }}
+            vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+            {{- end }}
+            vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+            vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+            # Reinicia este pod cuando rote la password de Redis; ver connector.redisSecretChecksum.
+            checksum/redis-secret: {{ include "connector.redisSecretChecksum" $ }}
+          {{- if .Values.redis.resourcesPreset }}
+          resourcesPreset: {{ .Values.redis.resourcesPreset }}
+          {{- end }}
+          {{- if eq .Values.resourcePreset "low" }}
+          resources:
+            requests:
+              cpu: "0"
+              memory: "0"
+          {{- else }}
+            {{- if .Values.redis.resources }}
+          resources: {{- toYaml .Values.redis.resources | nindent 10 }}
+            {{- end }}
+          {{- end }}
+  {{- if .Values.redis_commander.enabled }}
+  # Redis Commander
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.redis_commander.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.redis_commander.valueFiles }}
+        - $values/Agents/connector/app-values/Redis_commander/{{ . }}
+        {{- end }}
+      values: |
+        fullnameOverride: {{ .Values.redis_commander.nameOverride }}
+        ingress:
+          hosts:
+          - host: redis-commander-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+            paths:
+              - "/"
+          tls:
+          - secretName: redis-commander-tls
+            hosts:
+              - redis-commander-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+          annotations:
+            cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.redis_commander.resources }}
+        resources: {{- toYaml .Values.redis_commander.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- end }}
+  # Keycloak
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.keycloak.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.keycloak.valueFiles }}
+        - $values/Agents/connector/app-values/Keycloak/{{ . }}
+        {{- end }}
+      values: |
+        fullnameOverride: {{ .Values.keycloak.nameOverride }}
+        # Modo produccion (kc.sh start, no start-dev). KC_HOSTNAME/ADMIN ya fijados mas
+        # abajo en extraEnvVars; apisix termina el TLS -> proxyHeaders xforwarded.
+        production: true
+        proxyHeaders: "xforwarded"
+        apiUrl: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+        podAnnotations:
+          vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+          {{- with include "connector.vaultCaSecret" $ }}
+          vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+          {{- end }}
+          vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+        auth:
+          adminPassword: vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-keycloak#admin
+        externalDatabase:
+          host: "pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local"
+          database: {{ .Values.namespaceTag.dataprovider }}_keycloak
+          user: {{ .Values.namespaceTag.dataprovider }}_keycloak
+          password: vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-postgres-passwords#{{ .Values.cluster.namespace }}-keycloak
+        realmHardening:
+          enabled: true
+          keycloakUrl: "http://keycloak.{{ .Values.cluster.namespace }}.svc.cluster.local"
+          adminUser: "admin"
+          adminPassword: "vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-keycloak#admin"
+          realm: "participant"
+          vault:
+            addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+            {{- with include "connector.vaultCaSecret" $ }}
+            # Misma CA que el pod de Keycloak: sin ella el hook PostSync muere en vault-env
+            # (x509) en cuanto OpenBao se sirve con la CA interna.
+            tlsSecret: {{ . }}
+            {{- end }}
+            role: {{ .Values.secrets.role }}
+            envImage: "ghcr.io/cnie-es/vault-env:1.22.1"
+          {{- if eq (.Values.adminRealmAccess | default "public") "internal" }}
+          # adminRealmAccess=internal: el realm master se sirve en el host interno. Sin
+          # esto la consola se SIRVE en adminHost pero se AUTENTICA contra el host
+          # publico (KC_HOSTNAME), lo que rompe el iframe de 3rd-party-check por CSP e
+          # impide cerrar /realms/master/* en internet.
+          masterFrontendUrl: "https://{{ .Values.adminHost }}"
+          {{- end }}
+        {{- if eq (.Values.adminRealmAccess | default "public") "internal" }}
+        # Capa 1: cierra /auth/admin/* y /auth/realms/master/* en el host publico del
+        # participante. El frontendUrl interno rompe el flujo de NAVEGADOR pero NO el
+        # de API: el direct grant contra master seguiria respondiendo desde internet.
+        masterRealmPublicBlock:
+          enabled: true
+          host: "participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+        {{- end }}
+        {{- if eq (.Values.adminRealmAccess | default "public") "internal" }}
+        ingress:
+          enabled: true
+          ingressClassName: apisix
+          hostname: {{ .Values.adminHost | quote }}
+          {{- /* Keycloak sirve en la RAIZ: /realms/master responde 200 y
+                 /auth/realms/master da 404. El prefijo /auth del host publico NO es de
+                 Keycloak, lo pone el tier1-gateway. Este Ingress va DIRECTO al Service
+                 de Keycloak, asi que va en la raiz y sin reescritura. */}}
+          path: /
+          pathType: Prefix
+          annotations:
+            k8s.apisix.apache.org/allowlist-source-range: {{ .Values.adminAllowlistSourceRange | default "10.123.0.1/32" | quote }}
+            external-dns.alpha.kubernetes.io/target: {{ .Values.adminIngressTarget | quote }}
+          extraTls:
+            - hosts:
+                - {{ .Values.adminHost | quote }}
+              secretName: private-ca-tls
+        {{- end }}
+        extraEnvVars:
+        - name: KC_HOSTNAME_ADMIN
+        {{- if eq (.Values.adminRealmAccess | default "public") "internal" }}
+          {{- /* La consola sale por el host interno; KC_HOSTNAME (abajo) NO se toca, asi
+                 que los usuarios del realm del participante siguen entrando por el
+                 publico. Funciona porque KC_HOSTNAME_STRICT ya esta en false.
+                 OJO: con ingress.enabled el ConfigMap del subchart tambien emite
+                 KC_HOSTNAME (=adminHost), pero `env` gana a `envFrom`, asi que manda
+                 este extraEnvVars. Verificado en prodauth. */}}
+          value: "https://{{ .Values.adminHost }}"
+        {{- else }}
+          value: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/auth"
+        {{- end }}
+        - name: KC_HOSTNAME
+          value: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/auth"
+        - name: USERS_ROLES_BASE_URL
+          value: "http://users-roles.{{ .Values.cluster.namespace }}.svc.cluster.local:8080"
+        - name: KEYCLOAK_BASE_URL
+          value: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/auth"
+        - name: AUTHENTICATION_PROVIDER_BASE_URL
+          value: "http://authentication-provider.{{ .Values.cluster.namespace }}.svc.cluster.local:8080"
+        - name: REALM
+          value: "participant"
+        - name: KEYCLOAK_EXTRA_ARGS
+          value: --import-realm
+        # production=true (kc start optimizado) exige HTTPS o http-enabled. apisix/tier1
+        # terminan el TLS y hablan HTTP con Keycloak (proxyHeaders=xforwarded).
+        - name: KC_HTTP_ENABLED
+          value: "true"
+        # RAIZ del sitio publico que sirve los logos de los correos de Keycloak, igual
+        # que en el Keycloak de la authority. El theme lee
+        # ednelAssetBaseUrl=${env.EDNEL_EMAIL_ASSET_BASE_URL:} de su theme.properties y
+        # Keycloak sustituye la referencia al cargarlo. NO lleva ruta: el theme cuelga de
+        # esta raiz sus dos rutas, themes/custom/ednel y sites/default/files/<yyyy-mm>.
+        #
+        # Es el portal de PRODUCCION en todos los entornos a proposito: es el unico sitio
+        # donde esas imagenes estan publicadas, y sobre todo porque el correo no lo abre
+        # el navegador del destinatario -- en Gmail lo descarga la CDN de Google desde
+        # Internet, asi que un host .example.invalid no carga ni para quien lea el correo
+        # desde la VPN.
+        #
+        # Sin la variable el theme cae a ${url.resourcesUrl}, cuyo tag de version rota en
+        # cada arranque del pod porque el initContainer rebaja el jar, y deja los logos
+        # rotos en los correos YA entregados.
+        #
+        # Faltaba: el realm del participante ya trae emailTheme y el jar del theme ya
+        # incluye las plantillas de correo (executeActions.ftl y los mensajes en es, ca,
+        # va, eu y gl), asi que esto era lo unico que separaba a sus correos de los de la
+        # authority. Comprobado en caliente sobre stageaytopruebautom.
+        - name: EDNEL_EMAIL_ASSET_BASE_URL
+          value: "https://vallelengua.es"
+        initContainers:
+        - name: download-realm
+          image: ghcr.io/cnie-es/curlimages-curl:8.18.0
+          command: ["/bin/sh", "-c"]
+          env:
+            {{- with .Values.configFiles.tokenRef }}
+            - name: CONFIG_FILES_TOKEN
+              value: {{ . | quote }}
+            {{- end }}
+          args:
+            - |
+              curl -fsSL \
+                {{ if .Values.configFiles.insecureTls }}-k {{ end }}{{ if .Values.configFiles.tokenRef }}-H "Authorization: token ${CONFIG_FILES_TOKEN}" {{ end }}\
+                "{{ required "configFiles.baseUrl es obligatorio: de ahi se descargan el export del realm y el tema de Keycloak" .Values.configFiles.baseUrl }}/{{ .Values.configFiles.realmExportPath }}" \
+                -o /realm-template/realm-template.json
+          volumeMounts:
+            - name: realm-config-volume
+              mountPath: /realm-template
+        - name: import-realm
+          image: ghcr.io/cnie-es/nginx:1.0.0
+          command: ["/bin/sh", "-c"]
+          env:
+            - name: REDIRECT_URIS
+              value: |-
+                [ "https://participant-fe-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/*","https://catalogue-ui-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/*","https://sd-ui-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/*","https://infrastructure-fe-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/*","https://data-dashboard-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/*" ]
+            - name: REALM_NAME
+              value: realm
+            # SMTP del realm del participante. Sale del Secret notification-smtp, el MISMO
+            # que usan notification-service y el realm de la authority: no se crean
+            # credenciales nuevas. Hace falta para que Keycloak pueda mandarle al admin el
+            # correo de UPDATE_PASSWORD; hasta ahora el realm tenia smtpServer vacio y su
+            # Keycloak no podia enviar nada.
+            # El Secret lo replica common-sealed-secrets al namespace del participante
+            # (scope 'hybrids'), ver edval-gitops#169.
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: notification-smtp
+                  key: SMTP_HOST
+            - name: SMTP_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: notification-smtp
+                  key: SMTP_PORT
+            - name: SMTP_STARTTLS
+              valueFrom:
+                secretKeyRef:
+                  name: notification-smtp
+                  key: SMTP_STARTTLS
+            - name: SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: notification-smtp
+                  key: SMTP_USERNAME
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: notification-smtp
+                  key: SMTP_PASSWORD
+            - name: ADMIN_DATAPROVIDER_FIRSTNAME
+              value: {{ .Values.keycloak.adminUser.firstName | quote }}
+            - name: ADMIN_DATAPROVIDER_LASTNAME
+              value: {{ .Values.keycloak.adminUser.lastName | quote }}
+            - name: ADMIN_DATAPROVIDER_EMAIL
+              value: {{ .Values.keycloak.adminUser.email | quote }}
+          args:
+            - |
+              envsubst '$REDIRECT_URIS $ADMIN_DATAPROVIDER_FIRSTNAME $ADMIN_DATAPROVIDER_LASTNAME $ADMIN_DATAPROVIDER_EMAIL $SMTP_HOST $SMTP_PORT $SMTP_STARTTLS $SMTP_USERNAME $SMTP_PASSWORD' \
+                < /realm-template/realm-template.json > /config/${REALM_NAME}.json;
+          volumeMounts:
+            - name: realm-config-volume
+              mountPath: /realm-template
+            - name: realm-volume
+              mountPath: /config
+        - name: init-spi
+          image: ghcr.io/cnie-es/curlimages-curl:8.18.0
+          command: ["/bin/sh", "-c"]
+          env:
+            {{- with .Values.configFiles.tokenRef }}
+            - name: CONFIG_FILES_TOKEN
+              value: {{ . | quote }}
+            {{- end }}
+          args:
+            - |
+              curl -fsSL \
+                {{ if .Values.configFiles.insecureTls }}-k {{ end }}{{ if .Values.configFiles.tokenRef }}-H "Authorization: token ${CONFIG_FILES_TOKEN}" {{ end }}\
+                "{{ required "configFiles.baseUrl es obligatorio: de ahi se descarga el jar del authenticator SPI" .Values.configFiles.baseUrl }}/{{ .Values.configFiles.authenticatorPath }}" \
+                -o /custom-spi/keycloak-authenticator.jar
+          volumeMounts:
+          - name: spi-volume
+            mountPath: /custom-spi
+        - name: init-theme
+          image: ghcr.io/cnie-es/curlimages-curl:8.18.0
+          command: ["/bin/sh", "-c"]
+          env:
+            {{- with .Values.configFiles.tokenRef }}
+            - name: CONFIG_FILES_TOKEN
+              value: {{ . | quote }}
+            {{- end }}
+          args:
+            - |
+              curl -fsSL \
+                {{ if .Values.configFiles.insecureTls }}-k {{ end }}{{ if .Values.configFiles.tokenRef }}-H "Authorization: token ${CONFIG_FILES_TOKEN}" {{ end }}\
+                "{{ required "configFiles.baseUrl es obligatorio: de ahi se descargan el export del realm y el tema de Keycloak" .Values.configFiles.baseUrl }}/{{ .Values.configFiles.themePath }}" \
+                -o /custom-theme/keycloakify-starter.jar
+          volumeMounts:
+          - name: theme-volume
+            mountPath: /custom-theme
+        {{- if .Values.keycloak.resourcesPreset }}
+        resourcesPreset: {{ .Values.keycloak.resourcesPreset }}
+        {{- end }}
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.keycloak.resources }}
+        resources: {{- toYaml .Values.keycloak.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- if .Values.sdtooling_api_be.enabled }}
+  # SD Tooling API BE
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.sdtooling_api_be.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.sdtooling_api_be.valueFiles }}
+        - $values/Agents/connector/app-values/sdtooling-api-be/{{ . }}
+        {{- end }}
+      values: |
+        ingress:
+          clusterIssuer: {{ .Values.cluster.issuer }}
+        domain: {{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.sdtoolingApiBe }}
+        catalogueAdapter:
+          tier2Gateway:
+            url: "https://tls-authority-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}"
+        federatedCatalogue:
+          tier2Gateway:
+            url: "https://tls-authority-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}"
+        openapiConfig:
+          servers: https://sd-creation-wizard-api
+        openTelemetry:
+          otlpExporter:
+            endpoint: http://collector-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+        hash:
+          config:
+            algorithm: "SHA256"
+            templates: '[
+                          {
+                            "key": "Contract Template 1",
+                            "value": "https://files-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/static/contract/ContractTemplate1.json"
+                          },
+                          {
+                            "key": "Contract Template 2",
+                            "value": "https://files-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/static/contract/ContractTemplate2.json"
+                          },
+                          {
+                            "key": "Contract Template 3",
+                            "value": "https://files-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/static/contract/ContractTemplate3.json"
+                          },
+                          {
+                            "key": "Billing Schema 1",
+                            "value": "https://files-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/static/pdf/BillingSchema1.pdf"
+                          },
+                          {
+                            "key": "Billing Schema 2",
+                            "value": "https://files-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/static/pdf/BillingSchema2.pdf"
+                          },
+                          {
+                            "key": "Billing Schema 3",
+                            "value": "https://files-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/static/pdf/BillingSchema1.pdf"
+                          },
+                          {
+                            "key": "Sla Agreements 1",
+                            "value": "https://files-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/static/pdf/SLAAgreement1.pdf"
+                          },
+                          {
+                            "key": "Sla Agreements 2",
+                            "value": "https://files-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/static/pdf/SLAAgreement2.pdf"
+                          },
+                          {
+                            "key": "Sla Agreements 3",
+                            "value": "https://files-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/static/pdf/SLAAgreement1.pdf"
+                          }
+                        ]'
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.sdtooling_api_be.resources }}
+        resources: {{- toYaml .Values.sdtooling_api_be.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+      releaseName: {{ .Values.sdtooling_api_be.nameOverride }}
+  {{- end }}
+  {{- if .Values.sdtooling_validation_api_be.enabled }}
+  # SD Tooling Validation API BE
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.sdtooling_validation_api_be.path }}
+    helm:
+      values: |
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.sdtoolingValidationApiBe }}
+        openTelemetry:
+          otlpExporter:
+            endpoint: http://collector-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.sdtooling_validation_api_be.resources }}
+        resources: {{- toYaml .Values.sdtooling_validation_api_be.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+      valueFiles:
+        {{- range .Values.sdtooling_validation_api_be.valueFiles }}
+        - $values/Agents/connector/app-values/sdtooling-validation-api-be/{{ . }}
+        {{- end }}
+      releaseName: {{ .Values.sdtooling_validation_api_be.nameOverride }}
+  {{- end }}
+  {{- if .Values.xfsc_advsearch_be.enabled }}
+  # XFSC Advanced Search BE
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.xfsc_advsearch_be.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.xfsc_advsearch_be.valueFiles }}
+        - $values/Agents/connector/app-values/xfsc-advsearch-be/{{ . }}
+        {{- end }}
+      values: |
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.xfscAdvsearch }}
+        ingress:
+          clusterIssuer: {{ .Values.cluster.issuer }}
+        domain: {{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        catalogueAdapter:
+          tier2Gateway:
+            url: "https://tls-authority-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}"
+        federatedCatalogue:
+          tier2Gateway:
+            url: "https://tls-authority-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}"
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.xfsc_advsearch_be.resources }}
+        resources: {{- toYaml .Values.xfsc_advsearch_be.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+      releaseName: {{ .Values.xfsc_advsearch_be.nameOverride }}
+  {{- end }}
+  {{- if .Values.contract_consumption_be.enabled }}
+  # Contract Consumption BE (capacidad de consumo del Agente hibrido)
+  - repoURL: {{ .Values.values.repo_URL }}
+    path: {{ .Values.contract_consumption_be.path }}
+    targetRevision: {{ .Values.values.branch }}
+    helm:
+      valueFiles:
+        {{- range .Values.contract_consumption_be.valueFiles }}
+        - $values/Agents/connector/app-values/contract-consumption-be/{{ . }}
+        {{- end }}
+      values: |
+        image:
+          repository: "ghcr.io/cnie-es/contract-consumption-be"
+          tag: {{ .Values.imagesTags.contractConsumptionBe | quote }}
+        domain: {{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.contract_consumption_be.resources }}
+        resources: {{- toYaml .Values.contract_consumption_be.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+
+        openapiConfig:
+          servers: https://creation-wizard-api-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        openTelemetry:
+          otlpExporter:
+            endpoint: http://collector-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+        vault:
+          secretEngine: "{{ .Values.secrets.secretEngine }}"
+          secretPath: "{{ .Values.secrets.secretEngine }}/{{ .Values.cluster.namespace }}-contract-consumption-be"
+          role: "{{ .Values.secrets.role }}"
+          service: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+        kafka:
+          bootstrapServers: kafka.{{ .Values.cluster.commonToolsNamespace }}.svc.cluster.local:9092
+      releaseName: {{ .Values.contract_consumption_be.nameOverride }}
+  {{- end }}
+  {{- if .Values.signer.enabled }}
+  # Signer
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.signer.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.signer.valueFiles }}
+        - $values/Agents/connector/app-values/Signer/{{ . }}
+        {{- end }}
+      values: |
+        serviceAccount:
+          name: "{{ .Values.signer.serviceAccountName }}"
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.signer }}
+        ingress:
+          enabled: false
+          frontendDomain: signer-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+          annotations:
+            cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+        hashicorp:
+          {{- with include "connector.vaultCaSecret" $ }}
+          tlsSecret: {{ . }}
+          {{- end }}
+          service: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+          role: {{ .Values.secrets.role }}
+        secretEngine: {{ .Values.secrets.secretEngine }}
+        secretConfigPath: "{{ .Values.secrets.secretEngine }}/{{ .Values.cluster.namespace }}-infra-adapter-simpl-backend"
+  {{- end }}
+  {{- if .Values.simpl_catalogue_client.enabled }}
+  # Simpl Catalogue Client
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.simpl_catalogue_client.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.simpl_catalogue_client.valueFiles }}
+        - $values/Agents/connector/app-values/Simpl-catalogue-client/{{ . }}
+        {{- end }}
+      values: |
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.simplCatalogueClient }}
+        env:
+          PUBLIC_AUTH_KEYCLOAK_SERVER_URL: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+          PUBLIC_FC_DATA_URL: "https://tls-authority-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}/fc"
+          PUBLIC_SEARCH_API_URL: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/xfsc-advsearch-be"
+          PUBLIC_CONTRACT_CONSUMPTION_API_URL: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/contract-consumption"
+        ingress:
+          className: apisix
+          annotations:
+            kubernetes.io/ingress.class: apisix
+            {{- if and (not .Values.embeddedCommon.enabled) (not .Values.wildcardTlsExternal) }}
+            cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+            acme.cert-manager.io/http01-edit-in-place: "true"
+            {{- end }}
+            k8s.apisix.apache.org/proxy-body-size: 5m
+            k8s.apisix.apache.org/proxy-buffering: "on"
+            k8s.apisix.apache.org/proxy-buffer-size: "8k"
+          hosts:
+            - host: catalogue-ui-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+              paths:
+              - path: /*
+                pathType: ImplementationSpecific
+          tls:
+            - secretName: {{ .Values.wildcardTlsSecretName | default (printf "catalogue-ui-%s-tls" .Values.namespaceTag.dataprovider) }}
+              hosts:
+                - catalogue-ui-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.simpl_catalogue_client.resources }}
+        resources: {{- toYaml .Values.simpl_catalogue_client.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- end }}
+  # Tier 1 Gateway
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.tier1_gateway.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.tier1_gateway.valueFiles }}
+        - $values/Agents/connector/app-values/tier1-gateway/{{ . }}
+        {{- end }}
+      values: |
+        {{- if $.Values.caTrust.enabled }}
+        caTrust:
+          enabled: true
+          secretName: {{ $.Values.caTrust.secretName }}
+          caKey: {{ $.Values.caTrust.caKey }}
+          alias: {{ $.Values.caTrust.alias }}
+        {{- end }}
+        hostT1: participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.tier1Gateway }}
+        cors:
+          allowOrigin: https://participant-fe-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }},https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }},https://infrastructure-fe-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }},https://data-dashboard-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }},http://localhost:4202,http://localhost:3000
+        ingress:
+          issuer: {{ .Values.cluster.issuer }}
+          {{- if .Values.wildcardTlsSecretName }}
+          # SaaS interno y externo: usar el cert wildcard configurado (interno=vallelengua-tls,
+          # externo=el del participante). Fijar ingress.tls.secretName omite la anotacion
+          # cluster-issuer (el letsencrypt per-host no completa el challenge ACME on-prem ->
+          # APISIX no publicaria la ruta -> onboarding 404 Route Not Found).
+          tls:
+            secretName: {{ .Values.wildcardTlsSecretName }}
+          {{- end }}
+        keycloakUrl: http://keycloak.{{ .Values.cluster.namespace }}.svc.cluster.local
+        usersRolesUrl: http://users-roles.{{ .Values.cluster.namespace }}.svc.cluster.local:8080
+        authenticationProviderUrl: http://authentication-provider.{{ .Values.cluster.namespace }}.svc.cluster.local:8080
+        appConfig:
+          jwt-configuration:
+            primary:
+              realm: participant
+          routes:
+            microservices-info:
+              microservices:
+                - name: users-roles
+                  internalUrl: "http://users-roles.{{ .Values.cluster.namespace }}.svc.cluster.local:8080/v1"
+                  detailUrl: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/userApi/v1/"
+                - name: authentication-provider
+                  internalUrl: "http://authentication-provider.{{ .Values.cluster.namespace }}.svc.cluster.local:8080/v1"
+                  detailUrl: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/authApi/v1/"
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.tier1_gateway.resources }}
+        resources: {{- toYaml .Values.tier1_gateway.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  # Users Roles
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.users_roles.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.users_roles.valueFiles }}
+        - $values/Agents/connector/app-values/Users-Roles/{{ . }}
+        {{- end }}
+      values: |
+        podAnnotations:
+          vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+          {{- with include "connector.vaultCaSecret" $ }}
+          vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+          {{- end }}
+          vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+        hostT1: participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.usersRoles }}
+        authorityHostT2: tls-authority-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}
+        global:
+          ingress:
+            issuer: {{ .Values.cluster.issuer }}
+        keycloak:
+          master:
+            password: vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-keycloak#admin
+        db:
+          url: "jdbc:postgresql://pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local:5432/{{ .Values.cluster.namespace }}_usersroles"
+          username: {{ .Values.namespaceTag.dataprovider }}_usersroles
+          password: vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-postgres-passwords#{{ .Values.cluster.namespace }}-usersroles
+        env:
+        - name: KAFKA_USERSROLES
+          value: "vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.commonToolsNamespace }}-kafka-credentials#{{ .Values.cluster.namespace }}_usersroles"
+        appConfig:
+          notification:
+            role-requests:
+              my-profile-url: "https://participant-fe-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/my-profile"
+              role-request-review-page: "https://participant-fe-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/role-requests-management/review/{roleRequestId}"
+        microservices:
+          authenticationProviderUrl: http://authentication-provider.{{ .Values.cluster.namespace }}.svc.cluster.local:8080
+        kafkaConfig:
+          spring:
+            kafka:
+              bootstrap-servers: kafka.{{ .Values.cluster.commonToolsNamespace }}.svc.cluster.local:9092
+              consumer:
+                group-id: users-roles
+                # earliest, NO el 'latest' por defecto de Spring. El topic
+                # iaa.<ns>....identity-attributes.updated lo AUTOCREA el authentication-provider
+                # la primera vez que publica, que es en su chequeo programado, horas despues de que
+                # users-roles ya este arrancado y suscrito por patron (inbox.topic.pattern). Cuando
+                # el consumidor descubre el topic nuevo no tiene offset comiteado, y con 'latest' se
+                # planta al final saltandose el UNICO mensaje que hay. Resultado: identity_attribute_roles
+                # se queda entero a enabled=false y el participante no tiene roles, con lag 0 y sin
+                # ningun error en ninguna parte. Pasado el 21/08 en prodddl, prodisbl y prodcnie.
+                auto-offset-reset: earliest
+                properties:
+                  security.protocol: SASL_PLAINTEXT
+                  sasl.mechanism: PLAIN
+                  sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="{{ .Values.cluster.namespace }}_usersroles" password="${KAFKA_USERSROLES}";
+              admin:
+                auto-create: true
+          simpl:
+            kafka:
+              topic:
+                prefix: iaa.{{ .Values.cluster.namespace }}.
+              inbox:
+                topic:
+                  pattern: iaa\.{{ .Values.cluster.namespace }}\..*
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.users_roles.resources }}
+        resources: {{- toYaml .Values.users_roles.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  # Users Roles FE
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.users_roles_fe.path }}
+    helm:
+      {{- if .Values.users_roles_fe.valueFiles }}
+      valueFiles:
+        {{- range .Values.users_roles_fe.valueFiles }}
+        - $values/Agents/connector/app-values/users-roles-fe/{{ . }}
+        {{- end }}
+      {{- end }}
+      values: |
+        hostFe: participant-fe-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        ingress:
+          issuer: {{ .Values.cluster.issuer }}
+          {{- if .Values.wildcardTlsSecretName }}
+          # SaaS interno/externo: cert wildcard configurado (interno=vallelengua-tls). Sin esto la
+          # ingress FE cae al cert per-host letsencrypt (participant-fe-<ns>...-cert) que NO existe/NO
+          # completa el challenge ACME on-prem -> el ingress-controller APISIX FALLA el reconcile TLS
+          # ("Secret ...-cert not found") -> NO publica la ruta -> el host participant-fe da 404.
+          tls:
+            secretName: {{ .Values.wildcardTlsSecretName }}
+          {{- end }}
+        cors:
+          allowOrigin: https://participant-fe-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }},https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }},http://localhost:4202,http://localhost:4203,http://localhost:3000
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.usersRolesFe }}
+        env:
+        - name: API_URL
+          value: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+        - name: KEYCLOAK_URL
+          value: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/auth"
+        - name: KEYCLOAK_REALM
+          value: "participant"
+        - name: KEYCLOAK_CLIENT_ID
+          value: "frontend-cli"
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.users_roles_fe.resources }}
+        resources: {{- toYaml .Values.users_roles_fe.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  # Tier 2 Gateway
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.tier2_gateway.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.tier2_gateway.valueFiles }}
+        - $values/Agents/connector/app-values/tier2-gateway/{{ . }}
+        {{- end }}
+      values: |
+        podAnnotations:
+          vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+          {{- with include "connector.vaultCaSecret" $ }}
+          vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+          {{- end }}
+          vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+          # Reinicia este pod cuando rote la password de Redis; ver connector.redisSecretChecksum.
+          checksum/redis-secret: {{ include "connector.redisSecretChecksum" $ }}
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.tier2Gateway }}
+        env:
+        - name: KAFKA_TIER2GW
+          value: "vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.commonToolsNamespace }}-kafka-credentials#{{ .Values.cluster.namespace }}_tier2gw"
+        - name: SPRING_DATA_REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secrets
+              key: redis
+        cors:
+          allowOrigin: https://authority-fe-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }},https://authority-be-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }},https://data-dashboard-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }},http://localhost:4202,http://localhost:3000
+        kafka:
+          bootstrap-servers: kafka.{{ .Values.cluster.commonToolsNamespace }}.svc.cluster.local:9092
+        redis:
+          host: "redis-master.{{ .Values.cluster.namespace }}.svc.cluster.local"
+        hostT2: "tls-participant-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+        {{- with .Values.lbNetwork }}
+        {{- if ne . "public" }}
+        lbNetwork: {{ . }}
+        {{- end }}
+        {{- end }}
+        {{- if $.Values.caTrust.enabled }}
+        caTrust:
+          enabled: true
+          secretName: {{ $.Values.caTrust.secretName }}
+          caKey: {{ $.Values.caTrust.caKey }}
+          alias: {{ $.Values.caTrust.alias }}
+        {{- end }}
+        authorityUrlT1: "https://authority-be-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}"
+        kafkaConfig:
+          spring:
+            kafka:
+              bootstrap-servers: kafka.{{ .Values.cluster.commonToolsNamespace }}.svc.cluster.local:9092
+              consumer:
+                properties:
+                  security.protocol: SASL_PLAINTEXT
+                  sasl.mechanism: PLAIN
+                  sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="{{ .Values.cluster.namespace }}_tier2gw" password="${KAFKA_TIER2GW}";
+              admin:
+                auto-create: true
+          simpl:
+            kafka:
+              topic:
+                prefix: iaa.{{ .Values.cluster.namespace }}.
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.tier2_gateway.resources }}
+        resources: {{- toYaml .Values.tier2_gateway.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  # Tier 2 Proxy
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.tier2_proxy.path }}
+    helm:
+      {{- if .Values.tier2_proxy.valueFiles }}
+      valueFiles:
+        {{- range .Values.tier2_proxy.valueFiles }}
+        - $values/Agents/connector/app-values/tier2-proxy/{{ . }}
+        {{- end }}
+      {{- end }}
+      values: |
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.tier2Proxy }}
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.tier2_proxy.resources }}
+        resources: {{- toYaml .Values.tier2_proxy.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  # Authentication Provider
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.auth_provider.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.auth_provider.valueFiles }}
+        - $values/Agents/connector/app-values/auth-provider/{{ . }}
+        {{- end }}
+      values: |
+        {{- if $.Values.caTrust.enabled }}
+        caTrust:
+          enabled: true
+          secretName: {{ $.Values.caTrust.secretName }}
+          caKey: {{ $.Values.caTrust.caKey }}
+          alias: {{ $.Values.caTrust.alias }}
+        {{- end }}
+        podAnnotations:
+          vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+          {{- with include "connector.vaultCaSecret" $ }}
+          vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+          {{- end }}
+          vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+          # Reinicia este pod cuando rote la password de Redis; ver connector.redisSecretChecksum.
+          checksum/redis-secret: {{ include "connector.redisSecretChecksum" $ }}
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.authenticationProvider }}
+        appConfig:
+          openid-connect:
+            certsEndpoint: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/auth/realms/participant/protocol/openid-connect/certs"
+            certs-endpoint: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/auth/realms/participant/protocol/openid-connect/certs"
+          management:
+            tracing:
+              sampling:
+                probability: 0.1
+            otlp:
+              tracing:
+                endpoint: http://collector-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+          spring:
+            datasource:
+              url: "jdbc:postgresql://pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local:5432/{{ .Values.cluster.namespace }}_authenticationprovider"
+              username: {{ .Values.namespaceTag.dataprovider }}_authenticationprovider
+            data:
+              redis:
+                host: "redis-master.{{ .Values.cluster.namespace }}.svc.cluster.local"
+          microservice:
+            identity-provider:
+              url: http://identity-provider.{{ .Values.cluster.namespace }}.svc.cluster.local:8080
+          client:
+            authority:
+              url: "https://tls-authority-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}"
+          simpl:
+            certificate:
+              san: "tls-participant-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+            gateway:
+              tier-one-url: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+              tier-two-url: "https://tls-participant-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+        env:
+        - name: KAFKA_AUTHPROVIDER
+          value: "vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.commonToolsNamespace }}-kafka-credentials#{{ .Values.cluster.namespace }}_authprovider"
+        - name: SPRING_DATA_REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secrets
+              key: redis
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: "vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-postgres-passwords#{{ .Values.cluster.namespace }}-authenticationprovider"
+        kafkaConfig:
+          spring:
+            kafka:
+              bootstrap-servers: kafka.{{ .Values.cluster.commonToolsNamespace }}.svc.cluster.local:9092
+              producer:
+                properties:
+                  security.protocol: SASL_PLAINTEXT
+                  sasl.mechanism: PLAIN
+                  sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="{{ .Values.cluster.namespace }}_authprovider" password="${KAFKA_AUTHPROVIDER}";
+              admin:
+                auto-create: true
+          simpl:
+            kafka:
+              topic:
+                prefix: iaa.{{ .Values.cluster.namespace }}.
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.auth_provider.resources }}
+        resources: {{- toYaml .Values.auth_provider.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  # Authentication Provider FE
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.auth_provider_fe.path }}
+    helm:
+      {{- if .Values.auth_provider_fe.valueFiles }}
+      valueFiles:
+        {{- range .Values.auth_provider_fe.valueFiles }}
+        - $values/Agents/connector/app-values/auth-provider-fe/{{ . }}
+        {{- end }}
+      {{- end }}
+      values: |
+        hostFe: participant-fe-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        ingress:
+          issuer: {{ .Values.cluster.issuer }}
+          {{- if .Values.wildcardTlsSecretName }}
+          # SaaS interno/externo: cert wildcard configurado (interno=vallelengua-tls). Sin esto la
+          # ingress FE cae al cert per-host letsencrypt (participant-fe-<ns>...-cert) que NO existe/NO
+          # completa el challenge ACME on-prem -> el ingress-controller APISIX FALLA el reconcile TLS
+          # ("Secret ...-cert not found") -> NO publica la ruta -> el host participant-fe da 404.
+          tls:
+            secretName: {{ .Values.wildcardTlsSecretName }}
+          {{- end }}
+        cors:
+          allowOrigin: https://participant-fe-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }},https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }},http://localhost:4202,http://localhost:4203,http://localhost:3000
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.feAuthenticationProvider }}
+        env:
+        - name: API_URL
+          value: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+        - name: KEYCLOAK_URL
+          value: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/auth"
+        - name: KEYCLOAK_REALM
+          value: "participant"
+        - name: KEYCLOAK_CLIENT_ID
+          value: "frontend-cli"
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.auth_provider_fe.resources }}
+        resources: {{- toYaml .Values.auth_provider_fe.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- if .Values.sd_ui.enabled }}
+  # SD UI
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.sd_ui.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.sd_ui.valueFiles }}
+        - $values/Agents/connector/app-values/simpl-sd-ui/{{ . }}
+        {{- end }}
+      values: |
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.sdUi }}
+        ingress:
+          className: apisix
+          annotations:
+            kubernetes.io/ingress.class: apisix
+            {{- if and (not .Values.embeddedCommon.enabled) (not .Values.wildcardTlsExternal) }}
+            cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+            acme.cert-manager.io/http01-edit-in-place: "true"
+            {{- end }}
+            k8s.apisix.apache.org/proxy-body-size: 5m
+            k8s.apisix.apache.org/proxy-buffering: "on"
+            k8s.apisix.apache.org/proxy-buffer-size: "8k"
+          hosts:
+            - host: sd-ui-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+              paths:
+              - path: /*
+                pathType: ImplementationSpecific
+          tls:
+            - secretName: {{ .Values.wildcardTlsSecretName | default (printf "sd-ui-%s-tls" .Values.namespaceTag.dataprovider) }}
+              hosts:
+                - sd-ui-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        env:
+          PUBLIC_AUTH_KEYCLOAK_SERVER_URL: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+          PUBLIC_CREATION_WIZARD_API_URL: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/sdtooling-api"
+          PUBLIC_SIGNER_URL: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/signer"
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.sd_ui.resources }}
+        resources: {{- toYaml .Values.sd_ui.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- end }}
+  {{- if .Values.data_dashboard.enabled }}
+  # Data Dashboard
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.data_dashboard.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.data_dashboard.valueFiles }}
+        - $values/Agents/connector/app-values/data-dashboard/{{ . }}
+        {{- end }}
+      values: |
+        fullnameOverride: {{ .Values.data_dashboard.nameOverride }}
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.dataDashboard }}
+        ingress:
+          enabled: true
+          className: apisix
+          annotations:
+            kubernetes.io/ingress.class: apisix
+            {{- if and (not .Values.embeddedCommon.enabled) (not .Values.wildcardTlsExternal) }}
+            cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+            acme.cert-manager.io/http01-edit-in-place: "true"
+            {{- end }}
+            k8s.apisix.apache.org/proxy-body-size: "5m"
+            k8s.apisix.apache.org/proxy-buffer-size: "8k"
+            k8s.apisix.apache.org/proxy-buffering: "on"
+          hosts:
+            - host: data-dashboard-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+              paths:
+                - path: /
+                  pathType: Prefix
+          tls:
+            - secretName: {{ .Values.wildcardTlsSecretName | default (printf "data-dashboard-%s-tls" .Values.namespaceTag.dataprovider) }}
+              hosts:
+                - data-dashboard-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        config:
+          runtimeConfigInjection: true
+          authMode: keycloak
+          keycloak:
+            url: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/auth"
+            realm: "participant"
+            clientId: "data-dashboard"
+            onLoad: "login-required"
+            checkLoginIframe: false
+          edc:
+            connectorName: "{{ .Values.cluster.namespace }}"
+            managementUrl: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/edc/management"
+            defaultUrl: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/edc/management"
+            protocolUrl: "https://tls-participant-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/edc/api/v1/dsp"
+            xfscAdvSearchBaseUrl: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/xfsc-advsearch-be/v1"
+            dashboardApiBaseUrl: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/datadashboardApi"
+            contractConsumptionApiBaseUrl: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/contract-consumption"
+            contractConsumptionApiVersion: "v1"
+            sdToolingBaseUrl: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/sdtooling-api/v2"
+            federatedCatalogEnabled: false
+            did: "did:web:tls-participant-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+            signerApiBaseUrl: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/signer"
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.data_dashboard.resources }}
+        resources: {{- toYaml .Values.data_dashboard.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- end }}
+  {{- if .Values.simpl_edc.enabled }}
+  # Simpl EDC
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.simpl_edc.path }}
+    helm:
+      releaseName: {{ .Values.simpl_edc.nameOverride }}
+      valueFiles:
+        {{- range .Values.simpl_edc.valueFiles }}
+        - $values/Agents/connector/app-values/simpl-edc/{{ . }}
+        {{- end }}
+      values: |
+        deployment:
+          tag: {{ .Values.imagesTags.simplEdc }}
+          host: {{ .Values.simpl_edc.nameOverride }}-service
+          callbackAddress: "https://tls-participant-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/edc"
+        env:
+          datasourceurl: "jdbc:postgresql://pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local:5432/{{ .Values.cluster.namespace }}_edc"
+          edcParticipantId: {{ .Values.cluster.namespace }}
+        postgresql:
+          username: {{ .Values.cluster.namespace }}_edc
+        hashicorp:
+          {{- with include "connector.vaultCaSecret" $ }}
+          tlsSecret: {{ . }}
+          {{- end }}
+          role: {{ .Values.secrets.role }}
+          service: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+        secretEngine: {{ .Values.secrets.secretEngine }}
+        ingress:
+          corsAllowOrigin: "*"
+          publicEndpoint:
+            enabled: true
+            host: public-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+            clusterIssuer: {{ .Values.cluster.issuer }}
+            tlsSecretName: public-be-{{ .Values.namespaceTag.dataprovider }}-tls
+            baseUrl: "https://public-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/public"
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.simpl_edc.resources }}
+        resources: {{- toYaml .Values.simpl_edc.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- end }}
+  {{- if .Values.simpl_edc_consumer.enabled }}
+  # Simpl EDC (perfil consumer) - 2a instancia para el Agente hibrido.
+  # Service simpl-edc-consumer-service (29xxx); DB propia <ns>_edc_consumer; mismo participante.
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.simpl_edc_consumer.path }}
+    helm:
+      releaseName: {{ .Values.simpl_edc_consumer.nameOverride }}
+      valueFiles:
+        {{- range .Values.simpl_edc_consumer.valueFiles }}
+        - $values/Agents/connector/app-values/simpl-edc-consumer/{{ . }}
+        {{- end }}
+      values: |
+        deployment:
+          tag: {{ .Values.imagesTags.simplEdc }}
+          host: {{ .Values.simpl_edc_consumer.nameOverride }}-service
+          callbackAddress: "https://tls-participant-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/edc"
+        env:
+          datasourceurl: "jdbc:postgresql://pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local:5432/{{ .Values.cluster.namespace }}_edc_consumer"
+          edcParticipantId: {{ .Values.cluster.namespace }}
+        postgresql:
+          username: {{ .Values.cluster.namespace }}_edc_consumer
+        hashicorp:
+          {{- with include "connector.vaultCaSecret" $ }}
+          tlsSecret: {{ . }}
+          {{- end }}
+          role: {{ .Values.secrets.role }}
+          service: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+        secretEngine: {{ .Values.secrets.secretEngine }}
+        ingress:
+          corsAllowOrigin: "*"
+          # publicEndpoint deshabilitado: la instancia provider ya expone public-be-<ns>;
+          # habilitar aqui colisionaria en el mismo host/ingress.
+          publicEndpoint:
+            enabled: false
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.simpl_edc_consumer.resources }}
+        resources: {{- toYaml .Values.simpl_edc_consumer.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- end }}
+  {{- if .Values.edc_connector_adapter.enabled }}
+  # EDC Connector Adapter
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.edc_connector_adapter.path }}
+    helm:
+      releaseName: {{ .Values.edc_connector_adapter.nameOverride }}
+      valueFiles:
+        {{- range .Values.edc_connector_adapter.valueFiles }}
+        - $values/Agents/connector/app-values/edc-connector-adapter/{{ . }}
+        {{- end }}
+      values: |
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.edcConnectorAdapter | quote }}
+        domain: {{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        ingress:
+          clusterIssuer: {{ .Values.cluster.issuer }}
+        openapiConfig:
+          servers: https://edc-connector-adapter-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        openTelemetry:
+          otlpExporter:
+            endpoint: http://collector-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+        edcConnector:
+          tier2BaseUrl: https://tls-participant-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/edc
+          participantId: {{ .Values.cluster.namespace }}
+          # Con participantIdSource, un init container resuelve el participantId canonico (UUID)
+          # desde el authentication-provider y lo exporta como EDC_CONNECTOR_PARTICIPANT_ID,
+          # ignorando participantId (= namespace). Debe coincidir con edc.participant.id del
+          # conector simpl-edc para que el assigner de la policy case en la contratacion.
+          participantIdSource: "http://authentication-provider:8080/v1/credentials"
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.edc_connector_adapter.resources }}
+        resources: {{- toYaml .Values.edc_connector_adapter.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- end }}
+  {{- if .Values.edc_connector_adapter_consumer.enabled }}
+  # EDC Connector Adapter (perfil consumer) - 2a instancia para el Agente hibrido.
+  # Publica los topics contract_consumption.* que consume contract-consumption-be.
+  - repoURL: {{ .Values.values.repo_URL }}
+    path: {{ .Values.edc_connector_adapter_consumer.path }}
+    targetRevision: {{ .Values.values.branch }}
+    helm:
+      releaseName: {{ .Values.edc_connector_adapter_consumer.nameOverride }}
+      valueFiles:
+        {{- range .Values.edc_connector_adapter_consumer.valueFiles }}
+        - $values/Agents/connector/app-values/edc-connector-adapter-consumer/{{ . }}
+        {{- end }}
+      values: |
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.edcConnectorAdapter | quote }}
+        ingress:
+          clusterIssuer: {{ .Values.cluster.issuer }}
+        domain: {{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        openapiConfig:
+          servers: https://edc-connector-adapter-consumer-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+        openTelemetry:
+          otlpExporter:
+            endpoint: http://collector-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+
+        profile: consumer
+        appJarPath: "/home/simpluser/app.jar"
+        {{- if not .Values.embeddedCommon.enabled }}
+        # Solo participantes INTERNOS/core: el authentication-provider vive en el namespace del
+        # participante, dentro del cluster del core. En un externo (self-hosted, values-external.yaml)
+        # no se inyecta y el chart no renderiza la variable.
+        participantAuthApiBaseUrl: "http://authentication-provider.{{ .Values.cluster.namespace }}.svc.cluster.local:8080"
+        {{- end }}
+
+        edcConnector:
+          # apiKey real viene de OpenBao via /vault/secrets/config.txt (source en el command).
+          # Aqui un placeholder para no disparar el mutating webhook de bank-vaults.
+          # Apunta al conector HIBRIDO unico (management :19193); antes, instancia consumer 29xxx.
+          baseUrl: http://simpl-edc-service:19193
+          apiKey: "placeholder-overridden-by-vault-agent"
+          participantId: {{ .Values.cluster.namespace }}
+          tier2BaseUrl: https://tls-participant-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/edc
+          # Con participantIdSource, un init container resuelve el participantId canonico (UUID)
+          # desde el authentication-provider y lo exporta como EDC_CONNECTOR_PARTICIPANT_ID.
+          # Debe coincidir con edc.participant.id del conector simpl-edc para que el assigner
+          # de la policy case en la contratacion.
+          participantIdSource: "http://authentication-provider:8080/v1/credentials"
+
+        kafka:
+          bootstrapServers: kafka.{{ .Values.cluster.commonToolsNamespace }}.svc.cluster.local:9092
+          consumer:
+            groupId: contract_consumption
+          topics:
+            transferStatus: contract_consumption.transfer_status-{{ .Values.cluster.namespace }}
+            transferDeprovisioning: contract_consumption.transfer_deprovisioning-{{ .Values.cluster.namespace }}
+            transferRecord: contract_consumption.transfer_record-{{ .Values.cluster.namespace }}
+            contractRecord: contract_consumption.contract_record-{{ .Values.cluster.namespace }}
+          auth:
+            type: SASL_PLAINTEXT
+          fatalIfBrokerNotAvailable: false
+
+        cluster:
+          namespace: {{ .Values.cluster.namespace }}
+
+        vault:
+          secretEngine: {{ .Values.secrets.secretEngine }}
+          secretPath: "{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-edc-connector-adapter-consumer"
+          role: {{ .Values.secrets.role }}
+          service: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+        {{- with include "connector.vaultCaSecret" $ }}
+          tlsSecret: {{ . }}
+        {{- end }}
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.edc_connector_adapter_consumer.resources }}
+        resources: {{- toYaml .Values.edc_connector_adapter_consumer.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- end }}
+  {{- if .Values.monitoring.enabled }}
+  # Monitoring
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.monitoring.path }}
+    helm:
+      releaseName: {{ .Values.monitoring.fullnameOverride }}
+      valueFiles:
+        {{- range .Values.monitoring.valueFiles }}
+        - $values/Agents/connector/app-values/monitoring/{{ . }}
+        {{- end }}
+      values: |
+        clusterIssuer: {{ .Values.cluster.issuer }}
+        domainSuffix: {{ .Values.domainSuffix }}
+        creimage:
+          tag: {{ .Values.imagesTags.monitoring }}
+        namespaceTag: {{ .Values.namespaceTag.dataprovider }}
+        # mainNamespace must be the common namespace where the elastic stack
+        # lives (filebeat/metricbeat ship there). The eck-monitoring chart
+        # gates `logstash_mon.yaml` with `if eq namespaceTag mainNamespace`,
+        # so they must be DIFFERENT in participant deployments — otherwise
+        # the chart tries to render the central logstash monitor pod here
+        # and explodes on `nil pointer .Values.logstash.mon.pipelines`
+        # (that subtree only exists in the common-side values, not in the
+        # participant override). cluster.commonToolsNamespace is set by the
+        # participant-apps chart to the common namespace (e.g. "intcommon").
+        mainNamespace: {{ .Values.namespaceTag.common | default .Values.cluster.commonToolsNamespace }}
+        filebeat:
+          {{- if eq .Values.resourcePreset "low" }}
+          resources:
+            requests:
+              cpu: "0"
+              memory: "0"
+          {{- else }}
+            {{- if .Values.monitoring.resources.filebeat }}
+          resources: {{- toYaml .Values.monitoring.resources.filebeat | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- if .Values.nodeSelector }}
+          nodeSelector: {{- toYaml .Values.nodeSelector | nindent 12 }}
+          {{- end }}
+          {{- if .Values.nodeSelector }}
+        metricbeat:
+          nodeSelector: {{- toYaml .Values.nodeSelector | nindent 12 }}
+          {{- end }}
+  {{- end }}
+  # Contract
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.contract.path }}
+    helm:
+      releaseName: {{ .Values.contract.fullnameOverride }}
+      valueFiles:
+        {{- range .Values.contract.valueFiles }}
+        - $values/Agents/connector/app-values/contract/{{ . }}
+        {{- end }}
+      values: |
+        podAnnotations:
+          vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+          {{- with include "connector.vaultCaSecret" $ }}
+          vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+          {{- end }}
+          vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+        deployment:
+          image:
+            registry: ghcr.io/cnie-es
+            tag: {{ .Values.imagesTags.contract }}
+          db:
+            url: "jdbc:postgresql://pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local:5432/{{ .Values.cluster.namespace }}_contract"
+            user: {{ .Values.cluster.namespace }}_contract
+          kafka:
+            bootstrapServer: http://kafka.{{ .Values.cluster.commonToolsNamespace }}.svc.cluster.local:9092
+            clientUser: {{ .Values.cluster.namespace }}_contract
+            clientPasswords: "vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.commonToolsNamespace }}-kafka-credentials#{{ .Values.cluster.namespace }}_contract"
+            topics:
+              signContractRequest: sign-contract-req-{{ .Values.cluster.namespace }}
+              signContractResponse: sign-contract-resp-{{ .Values.cluster.namespace }}
+              statusUpdate: status-update-{{ .Values.cluster.namespace }}
+              searchContractRequest: search-contract-req-{{ .Values.cluster.namespace }}
+          urls:
+            catalogSearch: "https://tls-authority-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}/adapter"
+            catalogGet: "https://tls-authority-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}/fc"
+          otel:
+            endpoint: http://collector-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+          vault:
+            hashicorp:
+              {{- with include "connector.vaultCaSecret" $ }}
+              tlsSecret: {{ . }}
+              {{- end }}
+              service: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+              secretEngine: {{ .Values.secrets.secretEngine }}
+              role: {{ .Values.secrets.role }}
+              secretConfigPath: "{{ .Values.secrets.secretEngine }}/{{ .Values.cluster.namespace }}-contract"
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.contract.resources }}
+        resources: {{- toYaml .Values.contract.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- if .Values.contract_consumer.enabled }}
+  # Contract Manager BE (modo CONSUMER) - 2a instancia para el Agente hibrido.
+  # DB y credenciales propias (<ns>_contract_consumer); topics separados por modo (-consumer).
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.contract_consumer.path }}
+    helm:
+      releaseName: {{ .Values.contract_consumer.fullnameOverride }}
+      valueFiles:
+        {{- range .Values.contract_consumer.valueFiles }}
+        - $values/Agents/connector/app-values/contract-consumer/{{ . }}
+        {{- end }}
+      values: |
+        podAnnotations:
+          vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+          {{- with include "connector.vaultCaSecret" $ }}
+          vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+          {{- end }}
+          vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+          vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+        deployment:
+          image:
+            registry: ghcr.io/cnie-es
+            tag: {{ .Values.imagesTags.contract }}
+          db:
+            url: "jdbc:postgresql://pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local:5432/{{ .Values.cluster.namespace }}_contract_consumer"
+            user: {{ .Values.cluster.namespace }}_contract_consumer
+          kafka:
+            bootstrapServer: http://kafka.{{ .Values.cluster.commonToolsNamespace }}.svc.cluster.local:9092
+            clientUser: {{ .Values.cluster.namespace }}_contract_consumer
+            clientPasswords: "vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.commonToolsNamespace }}-kafka-credentials#{{ .Values.cluster.namespace }}_contract_consumer"
+            topics:
+              signContractRequest: sign-contract-req-{{ .Values.cluster.namespace }}
+              signContractRequestDLT: sign-contract-req-dlt-{{ .Values.cluster.namespace }}
+              signContractResponse: sign-contract-resp-{{ .Values.cluster.namespace }}
+              signContractResponseDLT: sign-contract-resp-dlt-{{ .Values.cluster.namespace }}
+              statusUpdate: status-update-{{ .Values.cluster.namespace }}
+              statusUpdateDLT: status-update-dlt-{{ .Values.cluster.namespace }}
+              searchContractRequest: search-contract-req-{{ .Values.cluster.namespace }}
+              searchContractRequestDLT: search-contract-req-dlt-{{ .Values.cluster.namespace }}
+              searchContractResponse: search-contract-resp-{{ .Values.cluster.namespace }}
+              searchContractResponseDLT: search-contract-resp-dlt-{{ .Values.cluster.namespace }}
+              createContractRequest: create-contract-req-{{ .Values.cluster.namespace }}
+              createContractRequestDLT: create-contract-req-dlt-{{ .Values.cluster.namespace }}
+              createContractResponse: create-contract-resp-{{ .Values.cluster.namespace }}
+              createContractResponseDLT: create-contract-resp-dlt-{{ .Values.cluster.namespace }}
+          urls:
+            catalogSearch: "https://tls-authority-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}/adapter"
+            catalogGet: "https://tls-authority-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}/fc"
+          otel:
+            endpoint: http://collector-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+          vault:
+            hashicorp:
+              {{- with include "connector.vaultCaSecret" $ }}
+              tlsSecret: {{ . }}
+              {{- end }}
+              service: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+              secretEngine: {{ .Values.secrets.secretEngine }}
+              role: {{ .Values.secrets.role }}
+              secretConfigPath: "{{ .Values.secrets.secretEngine }}/{{ .Values.cluster.namespace }}-contract-consumer"
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.contract_consumer.resources }}
+        resources: {{- toYaml .Values.contract_consumer.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+  {{- end }}
+  # Stubs
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.stubs.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.stubs.valueFiles }}
+        - $values/Agents/connector/app-values/stubs/{{ . }}
+        {{- end }}
+      values: |
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.stubs }}
+  {{- if .Values.files.enabled }}
+  # Files
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.files.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.files.valueFiles }}
+        - $values/Agents/connector/app-values/files/{{ . }}
+        {{- end }}
+      values: |
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.simplFiles }}
+        ingress:
+          hostname: files-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+          secretName: files-{{ .Values.namespaceTag.dataprovider }}-tls
+          clusterIssuer: {{ .Values.cluster.issuer }}
+          {{- if .Values.wildcardTlsSecretName }}
+          # SaaS interno y externo: cert wildcard configurado. El flujo enriched del sd-tooling
+          # descarga las plantillas de contrato de files-<ns> por HTTPS; con self-signed el JDK
+          # falla (Failed to parse server certificates). Fijar tls.secretName omite cert-manager.
+          tls:
+            secretName: {{ .Values.wildcardTlsSecretName }}
+          {{- end }}
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.files.resources }}
+        resources: {{- toYaml .Values.files.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+      releaseName: {{ .Values.files.nameOverride }}
+  {{- end }}
+  # Dagster
+  {{- if .Values.dagster.enabled }}
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.dagster.path }}
+    helm:
+      skipSchemaValidation: true
+      valueFiles:
+        {{- range .Values.dagster.valueFiles }}
+        - $values/Agents/connector/app-values/dagster/{{ . }}
+        {{- end }}
+      values: |
+        dagster:
+          dagster-user-deployments:
+            deployments:
+              - name: field-level-pseudo-anonymisation
+                annotations:
+                  vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+                  {{- with include "connector.vaultCaSecret" $ }}
+                  vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+                  {{- end }}
+                  vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+                  vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+                location_name: field_level_pseudo_anonymisation
+                enabled: true
+                enableSubchart: true
+                codeServerArgs:
+                  - "--host"
+                  - "0.0.0.0"
+                  - "--port"
+                  - "4000"
+                  - "--python-file"
+                  - "src/field_level_pseudo_anonymisation/repository.py"
+                image:
+                  pullPolicy: IfNotPresent
+                  repository: ednel-rioja/k8s-images/data-services-field-level-pseudo-anonymisation
+                  tag: {{ .Values.dagster.field_level_pseudo_anonymisation.version }}
+                port: 4000
+                resources:
+                  {{- if eq .Values.resourcePreset "low" }}
+                  requests:
+                    cpu: "0"
+                    memory: "0"
+                  {{- else }}
+                    {{- if .Values.dagster.field_level_pseudo_anonymisation.resources.requests }}
+                  requests: {{- toYaml .Values.dagster.field_level_pseudo_anonymisation.resources.requests | nindent 20 }}
+                    {{- end }}
+                  {{- end }}
+                  limits: {{- toYaml .Values.dagster.field_level_pseudo_anonymisation.resources.limits | nindent 20 }}
+                livenessProbe:
+                  enabled: true
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+                readinessProbe:
+                  enabled: true
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+              - name: dataframe-level-anonymisation
+                annotations:
+                  vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+                  {{- with include "connector.vaultCaSecret" $ }}
+                  vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+                  {{- end }}
+                  vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+                  vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+                location_name: dataframe_level_anonymisation
+                enabled: true
+                enableSubchart: true
+                codeServerArgs:
+                  - "--host"
+                  - "0.0.0.0"
+                  - "--port"
+                  - "4000"
+                  - "--python-file"
+                  - "src/dataframe_level_anonymisation/repository.py"
+                image:
+                  pullPolicy: IfNotPresent
+                  repository: ednel-rioja/k8s-images/data-services-dataframe-level-anonymisation
+                  tag: {{ .Values.dagster.dataframe_level_anonymisation.version }}
+                port: 4000
+                resources:
+                  {{- if eq .Values.resourcePreset "low" }}
+                  requests:
+                    cpu: "0"
+                    memory: "0"
+                  {{- else }}
+                    {{- if .Values.dagster.dataframe_level_anonymisation.resources.requests }}
+                  requests: {{- toYaml .Values.dagster.dataframe_level_anonymisation.resources.requests | nindent 20 }}
+                    {{- end }}
+                  {{- end }}
+                  limits: {{- toYaml .Values.dagster.dataframe_level_anonymisation.resources.limits | nindent 20 }}
+                livenessProbe:
+                  enabled: true
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+                readinessProbe:
+                  enabled: true
+                  periodSeconds: 10
+                  timeoutSeconds: 3
+                  failureThreshold: 3
+          dagsterDaemon:
+            annotations:
+              vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+              {{- with include "connector.vaultCaSecret" $ }}
+              vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+              {{- end }}
+              vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+              vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+          postgresql:
+            postgresqlHost: "pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local"
+            postgresqlUsername: "{{ .Values.cluster.namespace }}_dagster"
+            postgresqlPassword: vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-postgres-passwords#{{ .Values.cluster.namespace }}-dagster
+            postgresqlDatabase: "{{ .Values.cluster.namespace }}_dagster"
+          ingress:
+            annotations:
+              cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+            dagsterWebserver:
+              host: dagster-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+          dagsterWebserver:
+            annotations:
+              vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+              {{- with include "connector.vaultCaSecret" $ }}
+              vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+              {{- end }}
+              vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+              vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+  {{- end }}
+  # crossplane # infrastructure-be
+  {{- if .Values.crossplane.enabled }}
+  # Infrastructure BE
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.infrastructure_be.path }}
+    helm:
+      releaseName: {{ .Values.infrastructure_be.fullnameOverride }}
+      valueFiles:
+        {{- range .Values.infrastructure_be.valueFiles }}
+        - $values/Agents/connector/app-values/infrastructure-be/{{ . }}
+        {{- end }}
+      values: |
+        fullnameOverride: {{ .Values.infrastructure_be.fullnameOverride }}
+        backend:
+          image:
+            registry: ghcr.io/cnie-es
+            tag: {{ .Values.imagesTags.infrastructureBe }}
+        namespace: {{ .Values.cluster.namespace }}
+        backend:
+          podAnnotations:
+            vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+            {{- with include "connector.vaultCaSecret" $ }}
+            vault.security.banzaicloud.io/vault-tls-secret: {{ . }}
+            {{- end }}
+            vault.security.banzaicloud.io/vault-role: {{ .Values.secrets.role }}
+            vault.security.banzaicloud.io/vault-env-image: "ghcr.io/cnie-es/vault-env:1.22.1"
+            vault.security.banzaicloud.io/vault-ignore-missing-secrets: "true"
+          env:
+            ALLOWED_ORIGINS: http://localhost:3001,https://{{ .Values.infrastructure_fe.fullnameOverride }}-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }},https://sd-ui-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+            VAULT_TOKEN: vault:login
+            SPRING_CLOUD_VAULT_TOKEN: vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-infrastructure-be#vault.token
+            SPRING_CLOUD_VAULT_URI: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+            SPRING_CLOUD_VAULT_URL: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}/v1/secret"
+            SPRING_DATASOURCE_URL: jdbc:postgresql://pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local:5432/{{ .Values.cluster.namespace }}_infrabe
+            SPRING_FLYWAY_URL: jdbc:postgresql://pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local:5432/{{ .Values.cluster.namespace }}_infrabe
+            SPRING_FLYWAY_USER: {{ .Values.cluster.namespace }}_infrabe
+            SPRING_FLYWAY_PASSWORD: vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-postgres-passwords#{{ .Values.cluster.namespace }}-infrabe
+            SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka.{{ .Values.cluster.commonToolsNamespace }}.svc.cluster.local:9092
+            SPRING_CONFIG_IMPORT: "${SPRING_CONFIG_IMPORT_PREFIX}://{{ .Values.secrets.secretEngine }}/{{ .Values.cluster.namespace }}-infrastructure-be"
+            SPRING_CONFIG_IMPORT_PREFIX: "vault"
+            SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/auth/realms/participant
+            GITEA_URL: "http://gitea-http.{{ .Values.cluster.namespace }}.svc.cluster.local:3000/api/v1"
+            GITEA_USER: {{ .Values.crossplane.gitea.username }}
+            GITEA_PASSWORD: {{ .Values.crossplane.gitea.password }}
+            OTEL_EXPORTER_OTLP_ENDPOINT: http://collector-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+            OTEL_SERVICE_NAME: "infrastructure-be"
+            OTEL_LOGS_EXPORTER: "none"
+          ingress:
+            enabled: true
+            hosts:
+              - host: {{.Values.infrastructure_be.fullnameOverride }}-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+                paths:
+                - path: /
+                  pathType: ImplementationSpecific
+            tls:
+              - secretName: {{ .Values.infrastructure_be.fullnameOverride }}-tld-secret
+                hosts:
+                  - {{.Values.infrastructure_be.fullnameOverride }}-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+            annotations:
+              cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+          {{- if eq .Values.resourcePreset "low" }}
+          resources:
+            requests:
+              cpu: "0"
+              memory: "0"
+          {{- else }}
+            {{- if .Values.infrastructure_be.resources }}
+          resources: {{- toYaml .Values.infrastructure_be.resources | nindent 12 }}
+            {{- end }}
+          {{- end }}
+  # Infrastructure FE
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.infrastructure_fe.path }}
+    helm:
+      releaseName: {{ .Values.infrastructure_fe.fullnameOverride }}
+      valueFiles:
+        {{- range .Values.infrastructure_fe.valueFiles }}
+        - $values/Agents/connector/app-values/infrastructure-fe/{{ . }}
+        {{- end }}
+      values: |
+        namespace: {{ .Values.cluster.namespace }}
+        image:
+          registry: ghcr.io/cnie-es
+          tag: {{ .Values.imagesTags.infrastructureFe }}
+        env:
+          VITE_API_BASE_URL: "https://{{.Values.infrastructure_be.fullnameOverride }}-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/api/infrastructureProvisioning/v1"
+          VITE_PUBLIC_AUTH_KEYCLOAK_SERVER_URL: "https://participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}"
+          VITE_PUBLIC_AUTH_KEYCLOAK_REALM: "participant"
+          VITE_PUBLIC_AUTH_KEYCLOAK_CLIENT_ID: "frontend-cli"
+        ingress:
+          hosts:
+            - host: {{.Values.infrastructure_fe.fullnameOverride }}-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+              paths:
+              - path: /
+                pathType: ImplementationSpecific
+          tls:
+            - secretName: {{ .Values.infrastructure_fe.fullnameOverride }}-tld-secret
+              hosts:
+                - {{.Values.infrastructure_fe.fullnameOverride }}-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
+          annotations:
+            cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+  {{- end }}
+
+  {{- if .Values.observability.enabled }}
+  # Observabilidad Prometheus del participante: blackbox-exporter + Probe de sus Ingress,
+  # PodMonitor de Patroni y las reglas criticas que tienen dato hoy.
+  # El blackbox de la authority NO cubre esto: sus 20 targets son todos de prodauth, y un
+  # Probe solo puede apuntar a un prober de su propio namespace.
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: {{ .Values.observability.path }}
+    helm:
+      releaseName: {{ .Values.observability.fullnameOverride }}
+      valueFiles:
+        {{- range .Values.observability.valueFiles }}
+        - $values/Agents/connector/app-values/observability/{{ . }}
+        {{- end }}
+      values: |
+        nameOverride: {{ .Values.observability.fullnameOverride }}
+  {{- end }}

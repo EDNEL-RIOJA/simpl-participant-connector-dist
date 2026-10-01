@@ -1,0 +1,226 @@
+server-port: &server-port 9000
+replicaCount: 1
+image:
+  repository: ghcr.io/cnie-es/iaa-tier1-gateway
+  pullPolicy: Always
+  tag: 2.11.0
+imagePullSecrets:
+  - name: github-registry-secret
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1001
+
+
+service:
+  type: ClusterIP
+  port: *server-port
+
+resources: 
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+livenessProbe:
+  httpGet:
+    path: "/actuator/health/liveness"
+    port: *server-port
+  initialDelaySeconds: 120
+  periodSeconds: 5
+  failureThreshold: 10
+readinessProbe:
+  httpGet:
+    path: "/actuator/health/readiness"
+    port: *server-port
+  initialDelaySeconds: 120
+  periodSeconds: 5
+  failureThreshold: 10
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 1
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+# Additional volumes on the output Deployment definition.
+volumes:
+  - name: spring-config
+    configMap:
+      name: tier1-gateway-spring-configmap
+
+# - name: foo
+#   secret:
+#     secretName: mysecret
+#     optional: false
+
+# Additional volumeMounts on the output Deployment definition.
+volumeMounts:
+  - name: spring-config
+    mountPath: /config/
+
+envFrom:
+  - configMapRef:
+      name: tier1-gateway-env-configmap
+
+usersRolesUrl: http://users-roles.{{ .Release.Namespace }}.svc.cluster.local:8080
+securityAttributesProviderUrl: http://security-attributes-provider.{{ .Release.Namespace }}.svc.cluster.local:8080
+keycloakUrl: http://keycloak.{{ .Release.Namespace }}.svc.cluster.local
+onboardingUrl: http://onboarding.{{ .Release.Namespace }}.svc.cluster.local:8080
+ejbcaUrl: http://ejbca-community-helm.{{ .Release.Namespace }}.svc.cluster.local:30080
+identityProviderUrl: http://identity-provider.{{ .Release.Namespace }}.svc.cluster.local:8080
+authenticationProviderUrl: http://authentication-provider.{{ .Release.Namespace }}.svc.cluster.local:8080
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# This is only an example of configuration, see the installation guilde
+#
+#appConfig:
+#  springdoc:
+#    swagger-ui:
+#      urls:
+#        - url: /serviceApi/v3/api-docs
+#          name: Service Name open API
+#
+#  external-routes:
+#    spring-route-definitions:
+#      - id: service-name
+#        uri: service-url
+#        predicates:
+#          - Path=/serviceApi/**
+#        filters:
+#          - StripPrefix=1
+#
+#    logging:
+#      business:
+#        - method: POST
+#          path: /serviceApi/endpoint
+#          config:
+#            operations:
+#              - BUSINESS_ACTION_NAME
+#    public-urls:
+#      - method: GET
+#        path: "/v1/info/version"
+#    denied-urls:
+#      - method: GET
+#        path: "/path/to/deny"
+#    rbac:
+#      - method: GET
+#        path: "/path/to/protect"
+#        roles:
+#          - ROLE
+#      - path: "/other/path/to/protect"
+#        roles:
+#          - ROLE
+#
+#  microservices-info:
+#    microservices:
+#      - name: users-roles
+#        internalUrl: http://localhost:8081/v1
+#        detailUrl: https://<t1-host>/userApi/v1
+#      - name: sap
+#        internalUrl: http://localhost:8081/v1
+#        detailUrl: https://<t1-host>/sapApi/v1
+#      - name: identity-provider
+#        internalUrl: http://localhost:8081/v1
+#        detailUrl: https://<t1-host>/identityApi/v1
+#      - name: onboarding
+#        internalUrl: http://localhost:8081/v1
+#        detailUrl: https://<t1-host>/onboardingApi/v1
+#      - name: authentication-provider
+#        internalUrl: http://localhost:8081/v1
+#        detailUrl: https://<t1-host>/authApi/v1
+#
+#  management:
+#    tracing:
+#      sampling:
+#        probability: [MANAGEMENT_TRACING_SAMPLING_PROBABILITY]
+#    otlp:
+#      tracing:
+#        endpoint: [MANAGEMENT_OTLP_TRACING_ENDPOINT]
+appConfig: {}
+
+profile: "authority" # authority or participant
+
+cors:
+  allowedHeaders: >
+    Access-Control-Allow-Headers,
+    Access-Control-Allow-Credentials,
+    Access-Control-Allow-Origin,
+    Access-Control-Allow-Methods,
+    Keep-Alive,
+    User-Agent,
+    Content-Type,
+    Authorization,
+    Tenant,
+    Channel,
+    Platform,
+    Set-Cookie,
+    geolocation,
+    x-mobility-mode,
+    device,
+    Cache-Control,
+    X-Request-With,
+    Accept,
+    Origin
+  allowOrigin: "" #cors origin separated by comma
+
+hostT1: "" #your t1 host
+
+ingress:
+  issuer: "" #the issuer of the ingress certificate
+  # TLS — dos modos (opt-in):
+  #  - tls.secretName VACIO  -> Let's Encrypt per-host (cert-manager emite el cert
+  #    del host via 'issuer'). Es el comportamiento por defecto.
+  #  - tls.secretName CON VALOR -> usa ESE Secret/SealedSecret TLS ya presente en el
+  #    namespace (p.ej. el wildcard "vallelengua-tls") y NO emite con Let's Encrypt
+  #    (suprime la anotacion cert-manager) -> evita el rate-limit de LE.
+  tls:
+    secretName: ""
+
+devMode: false
+
+# CA privada en el truststore del JVM. Ver la nota al principio de templates/deployment.yaml.
+# enabled=false por defecto: con certificados de CA publica no hace falta y el render no cambia.
+caTrust:
+  enabled: false
+  # Secret del namespace con la CA. En c1 lo emite cert-manager (wildcard del entorno).
+  secretName: private-ca-tls
+  caKey: ca.crt
+  alias: private-ca-ca
+  # Solo protege un truststore de CAs publicas dentro del pod; no es un secreto.
+  storePass: changeit

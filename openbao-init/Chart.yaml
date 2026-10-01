@@ -1,0 +1,4 @@
+apiVersion: v1
+name: openbao-init
+version: 1.1.1
+description: OpenBao initialization chart with auto-unseal support and Kubernetes auth auto-configuration

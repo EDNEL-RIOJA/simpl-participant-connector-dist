@@ -1,0 +1,8 @@
+# Overrides de entorno para el chart Monitoring/observability del participante.
+#
+# Vacío a propósito: los defaults del chart ya están calibrados para el participante
+# on-prem (imagen del blackbox espejada en Harbor, labels de Patroni verificadas en
+# prodisbl, alertas de clearing-house y Neo4j apagadas porque viven en la authority).
+#
+# Aquí irían, por ejemplo, un `probes.ingressDiscovery.selector` para no sondear todos
+# los Ingress, o `alerts.patroni.minMembers` si un participante corre con menos réplicas.

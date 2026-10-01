@@ -1,0 +1,136 @@
+{{- /*
+blackbox-exporter: sondeador HTTP. A diferencia del resto de exporters, que miran el
+sistema por dentro, éste lo mira DESDE FUERA, como lo vería un usuario con un
+navegador: llama a cada URL y publica dos números por endpoint.
+
+  probe_success           1 = contestó,   0 = no responde
+  probe_http_status_code  el código HTTP devuelto (200, 404, 502...)
+
+Con esos dos se cubren las alertas del grupo G1 (frontales e ingress públicos), que
+son las de mayor valor por esfuerzo: no dependen de recompilar ninguna imagen.
+
+No lo scrapea Prometheus directamente: es el objeto `Probe` (probe.yaml) el que le
+dice al Operator "usa este sondeador contra estas URLs".
+*/}}
+{{- if .Values.blackbox.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "observability.blackbox.fullname" . }}
+  labels:
+    {{- include "observability.labels" . | nindent 4 }}
+data:
+  blackbox.yml: |
+    modules:
+      # Módulo por defecto. valid_status_codes vacío = acepta cualquier 2xx.
+      # Los códigos de error NO se filtran aquí a propósito: interesa que el sondeo
+      # "tenga éxito" en el sentido de que hubo respuesta, y que sea la alerta
+      # FrontalCodigoError la que mire el código. Si se filtrasen aquí, un 404 se
+      # confundiría con "no responde" y se perdería la distinción.
+      http_2xx:
+        prober: http
+        timeout: {{ .Values.blackbox.timeout }}
+        http:
+          method: GET
+          valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+          follow_redirects: true
+          preferred_ip_protocol: ip4
+          # Los certificados internos los emite un issuer propio; el sondeo mide
+          # disponibilidad, no cadena de confianza.
+          tls_config:
+            insecure_skip_verify: true
+      # Igual que el anterior pero sin seguir redirecciones, para endpoints internos
+      # que responden 3xx de forma legítima.
+      http_2xx_noredirect:
+        prober: http
+        timeout: {{ .Values.blackbox.timeout }}
+        http:
+          method: GET
+          follow_redirects: false
+          preferred_ip_protocol: ip4
+          tls_config:
+            insecure_skip_verify: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "observability.blackbox.fullname" . }}
+  labels:
+    {{- include "observability.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.blackbox.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "observability.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: blackbox-exporter
+  template:
+    metadata:
+      annotations:
+        # Fuerza el rollout cuando cambian los módulos del ConfigMap.
+        checksum/config: {{ .Values.blackbox.timeout | toString | sha256sum | trunc 16 }}
+      labels:
+        {{- include "observability.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: blackbox-exporter
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: blackbox-exporter
+          image: "{{ .Values.blackbox.image.registry }}/{{ .Values.blackbox.image.repository }}:{{ .Values.blackbox.image.tag }}"
+          imagePullPolicy: {{ .Values.blackbox.image.pullPolicy }}
+          args:
+            - --config.file=/etc/blackbox_exporter/blackbox.yml
+            - --web.listen-address=:{{ .Values.blackbox.port }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.blackbox.port }}
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/blackbox_exporter
+              readOnly: true
+          {{- if .Values.blackbox.resources }}
+          resources: {{- toYaml .Values.blackbox.resources | nindent 12 }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "observability.blackbox.fullname" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "observability.blackbox.fullname" . }}
+  labels:
+    {{- include "observability.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "observability.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: blackbox-exporter
+  ports:
+    - name: http
+      port: {{ .Values.blackbox.port }}
+      targetPort: http
+{{- end }}

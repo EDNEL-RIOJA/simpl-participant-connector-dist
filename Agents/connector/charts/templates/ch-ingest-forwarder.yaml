@@ -1,0 +1,97 @@
+{{- if .Values.chIngest.enabled }}
+# Forwarder de records de la Clearing House hacia el gateway central por HTTPS+mTLS.
+# Consume el Kafka LOCAL del participante (contract_consumption.*_record-<ns>) y reenvía
+# cada record al gateway del core (que los produce al Kafka central para el pipeline
+# Logstash->ES->Clearing House existente). Es la única vía por la que un consumer NO-core
+# (self-hosted / fuera del Kafka central) puede alimentar la Clearing House: va incluido en
+# el paquete estándar del conector (platform-managed), el participante no lo configura ni
+# lo puede desactivar sin quitar el flag chIngest.enabled del propio despliegue gestionado.
+# Requiere (provisión operativa, fuera del chart): Secrets {{ .Values.chIngest.clientCertSecret }}
+# (tls.crt/tls.key firmados por la CA del canal ch-ingest) y {{ .Values.chIngest.caSecret }} (ca.crt).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ch-ingest-forwarder-pipeline
+  namespace: {{ .Values.cluster.namespace }}
+data:
+  pipeline.conf: |
+    input {
+      kafka {
+        bootstrap_servers => "kafka.{{ .Values.cluster.namespace }}.svc.cluster.local:9092"
+        security_protocol => "SASL_PLAINTEXT"
+        sasl_mechanism => "PLAIN"
+        sasl_jaas_config => "org.apache.kafka.common.security.plain.PlainLoginModule required username='{{ .Values.cluster.namespace }}_edcconn' password='${KAFKA_PASS}';"
+        topics_pattern => "contract_consumption\.(transfer|contract)_record-{{ .Values.cluster.namespace }}"
+        codec => json
+        group_id => "ch-forwarder-{{ .Values.cluster.namespace }}"
+        client_id => "ch-forwarder-{{ .Values.cluster.namespace }}"
+        auto_offset_reset => "earliest"
+        decorate_events => "basic"
+      }
+    }
+    filter {
+      mutate { add_field => { "poc_src_topic" => "%{[@metadata][kafka][topic]}" } }
+      mutate {
+        remove_field => [ "@version", "@timestamp", "event", "[@metadata]" ]
+      }
+    }
+    output {
+      http {
+        url => "{{ .Values.chIngest.gatewayUrl }}"
+        http_method => "post"
+        format => "json"
+        content_type => "application/json"
+        ssl_certificate => "/certs/client/tls.crt"
+        ssl_key => "/certs/client/tls.key"
+        ssl_certificate_authorities => [ "/certs/ca/ca.crt" ]
+        ssl_verification_mode => "full"
+        pool_max => 10
+        retry_failed => true
+      }
+    }
+  logstash.yml: |
+    api.http.host: "0.0.0.0"
+    xpack.monitoring.enabled: false
+    log.level: info
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ch-ingest-forwarder
+  namespace: {{ .Values.cluster.namespace }}
+  labels: { app: ch-ingest-forwarder }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: ch-ingest-forwarder }
+  template:
+    metadata:
+      labels: { app: ch-ingest-forwarder }
+    spec:
+      imagePullSecrets:
+        - name: github-registry-secret
+      containers:
+        - name: logstash
+          image: {{ .Values.chIngest.image | default "ghcr.io/cnie-es/logstash-logstash:9.4.1" }}
+          env:
+            - name: KAFKA_PASS
+              valueFrom:
+                secretKeyRef: { name: kafka-users-secret, key: "{{ .Values.cluster.namespace }}_edcconn" }
+            - name: LS_JAVA_OPTS
+              value: "-Xms256m -Xmx512m"
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          volumeMounts:
+            - { name: pipeline, mountPath: /usr/share/logstash/pipeline/pipeline.conf, subPath: pipeline.conf }
+            - { name: pipeline, mountPath: /usr/share/logstash/config/logstash.yml, subPath: logstash.yml }
+            - { name: client-tls, mountPath: /certs/client, readOnly: true }
+            - { name: mtls-ca, mountPath: /certs/ca, readOnly: true }
+      volumes:
+        - name: pipeline
+          configMap: { name: ch-ingest-forwarder-pipeline }
+        - name: client-tls
+          secret: { secretName: {{ .Values.chIngest.clientCertSecret | default "ch-ingest-client-tls" | quote }} }
+        - name: mtls-ca
+          secret: { secretName: {{ .Values.chIngest.caSecret | default "ch-ingest-mtls-ca" | quote }} }
+{{- end }}

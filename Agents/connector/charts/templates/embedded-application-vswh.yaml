@@ -1,0 +1,105 @@
+{{- if .Values.embeddedCommon.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: "{{ .Values.argocd.appname }}-vswh"
+  namespace: {{ .Values.argocd.namespace }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+
+spec:
+  syncPolicy:
+    automated: {}
+    syncOptions:
+      - ApplyOutOfSyncOnly=true
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[].clientConfig.caBundle
+    - kind: Secret
+      name: "vault-webhook-{{ .Values.cluster.namespace }}-webhook-tls"
+      jsonPointers:
+        - /data
+    - kind: Deployment
+      name: "vault-webhook-{{ .Values.cluster.namespace }}"
+      jsonPointers:
+        - /metadata/generation
+        - /metadata/annotations
+        - /spec/template/metadata/annotations
+        - /spec/progressDeadlineSeconds
+        - /spec/revisionHistoryLimit
+        - /spec/strategy
+        - /spec/template/spec/dnsPolicy
+        - /spec/template/spec/restartPolicy
+        - /spec/template/spec/schedulerName
+        - /spec/template/spec/securityContext
+        - /spec/template/spec/serviceAccount
+        - /spec/template/spec/terminationGracePeriodSeconds
+        - /spec/template/spec/containers/0/ports/0/protocol
+        - /spec/template/spec/containers/0/terminationMessagePath
+        - /spec/template/spec/containers/0/terminationMessagePolicy
+  project: {{ .Values.project }}
+  destination:
+    server: {{ .Values.cluster.address }}
+    namespace: "{{ .Values.cluster.namespace }}-vswh"
+  sources:
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    ref: values
+  - repoURL: {{ .Values.vault_webhook.repo_URL }}
+    targetRevision: {{ .Values.vault_webhook.targetRevision }}
+    path: {{ .Values.vault_webhook.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.vault_webhook.valueFiles }}
+        - $values/app-values/vault-webhook/{{ . }}
+        {{- end }}
+      values: |
+        watchNamespace: {{ .Values.cluster.namespace }}
+        fullnameOverride: vault-webhook-{{ .Values.cluster.namespace }}
+        serviceAccount:
+          name: vault-webhook-service-account
+        imagePullSecrets:
+          - name: github-registry-secret
+        namespaceSelector:
+          matchExpressions:
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values:
+                - {{ .Values.cluster.namespace }}
+                {{- range .Values.agentList.authorities }}
+                - {{ . }}
+                {{- end }}
+                {{- range .Values.agentList.consumers }}
+                - {{ . }}
+                {{- end }}
+                {{- range .Values.agentList.providers }}
+                - {{ . }}
+                {{- end }}
+        certificate:
+          generate: false
+          useCertManager: true
+        vaultEnv:
+          repository: "ghcr.io/cnie-es/vault-env"
+          tag: "1.22.1"
+        env:
+          VAULT_ADDR: "http://openbao-{{ .Values.cluster.namespace }}.{{ .Values.cluster.namespace }}.svc.cluster.local:8200"
+          VAULT_ENV_VAULT_ADDR: "http://openbao-{{ .Values.cluster.namespace }}.{{ .Values.cluster.namespace }}.svc.cluster.local:8200"
+          VAULT_ROLE: "{{ .Values.secrets.secretEngine }}-role"
+          VAULT_IMAGE: "{{ .Values.vault_webhook.image.repository }}:{{ .Values.vault_webhook.image.tag }}"
+        {{- if eq .Values.resourcePreset "low" }}
+        resources:
+          requests:
+            cpu: "0"
+            memory: "0"
+        {{- else }}
+          {{- if .Values.vault_webhook.resources }}
+        resources: {{- toYaml .Values.vault_webhook.resources | nindent 10 }}
+          {{- end }}
+        {{- end }}
+{{- end }}

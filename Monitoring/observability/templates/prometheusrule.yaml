@@ -1,0 +1,145 @@
+{{- /*
+Reglas de alerta críticas del espacio de datos, evaluadas por el Prometheus Operator
+EXTERNO (las encuentra por las mismas etiquetas de descubrimiento que el resto).
+
+REGLA DE ORO de este fichero: solo entran alertas cuya métrica EXISTE HOY. Lo que
+sigue bloqueado por una dependencia (rebuild de imagen con micrometer, métricas del
+EDC, componentes que no viven en este repo) está en MONITORIZACION-PENDIENTE.md con
+su PromQL listo. Una regla que nunca dispara es peor que ninguna: en el panel se lee
+como cobertura y nadie vuelve a mirarla.
+
+Cada alerta se activa por separado desde values, de modo que el mismo chart sirve
+para authority, consumer y data-provider encendiendo solo lo que cada uno tiene.
+
+Documento de origen: alertas_críticas_edval.txt
+*/}}
+{{- if .Values.alerts.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "observability.name" . }}-criticas
+  labels:
+    {{- include "observability.labels" . | nindent 4 }}
+    {{- include "observability.discoveryLabels" . | nindent 4 }}
+spec:
+  groups:
+    {{- if .Values.alerts.frontales.enabled }}
+    - name: edval-g1-frontales-ingress
+      rules:
+        # G1 · FrontalNoResponde — un frontal o ingress público que no contesta.
+        # Indisponibilidad visible para el usuario (portal/API caídos).
+        - alert: FrontalNoResponde
+          expr: probe_success{component="ingress"} == 0
+          for: {{ .Values.alerts.frontales.for }}
+          labels:
+            severity: critical
+            grupo: G1
+          annotations:
+            summary: "Frontal sin respuesta: {{ `{{ $labels.instance }}` }}"
+            description: >-
+              El sondeo de {{ `{{ $labels.instance }}` }} falla desde hace
+              {{ .Values.alerts.frontales.for }}. Indisponibilidad visible para el
+              usuario final.
+            runbook: "alertas_críticas_edval.txt — G1"
+
+        # G1 · FrontalCodigoError — responde, pero con un código de error.
+        # Cubre TODOS los códigos >= 400: 5xx (backend caído, APISIX sin upstream) y
+        # 4xx (rutas rotas, permisos). La etiqueta del código permite separar
+        # severidades más adelante sin tocar la regla.
+        - alert: FrontalCodigoError
+          expr: probe_http_status_code{component="ingress"} >= 400
+          for: {{ .Values.alerts.frontales.for }}
+          labels:
+            severity: critical
+            grupo: G1
+          annotations:
+            summary: "Frontal devolviendo {{ `{{ $value }}` }}: {{ `{{ $labels.instance }}` }}"
+            description: >-
+              {{ `{{ $labels.instance }}` }} lleva {{ .Values.alerts.frontales.for }}
+              devolviendo código {{ `{{ $value }}` }}. El servicio responde pero da
+              error: ruta rota, backend caído detrás del ingress, o permisos.
+            runbook: "alertas_críticas_edval.txt — G1"
+    {{- end }}
+
+    {{- if .Values.alerts.clearingHouse.enabled }}
+    - name: edval-g5-trazabilidad
+      rules:
+        # G5 · ClearingHouseCaida — sin clearing-house no hay registro doble ni
+        # trazabilidad central.
+        # NOTA: el documento propone up{job="clearing-house"}, pero la aplicación NO
+        # expone /metrics: ese `up` valdría 0 siempre y la alerta sería ruido
+        # permanente. Se sondea con blackbox contra su Service interno, que mide
+        # exactamente lo mismo (¿está vivo y respondiendo?).
+        - alert: ClearingHouseCaida
+          expr: probe_success{component="internal", instance=~".*clearing-house.*"} == 0
+          for: {{ .Values.alerts.clearingHouse.for }}
+          labels:
+            severity: critical
+            grupo: G5
+          annotations:
+            summary: "Clearing-house caído"
+            description: >-
+              El clearing-house no responde desde hace
+              {{ .Values.alerts.clearingHouse.for }}. Sin él no hay registro doble ni
+              trazabilidad central (riesgo de auditoría).
+            runbook: "alertas_críticas_edval.txt — G5"
+    {{- end }}
+
+    {{- if or .Values.alerts.redis.enabled .Values.alerts.neo4j.enabled .Values.alerts.patroni.enabled }}
+    - name: edval-g8-componentes-con-estado
+      rules:
+        {{- if .Values.alerts.redis.enabled }}
+        # G8 · RedisCaido — degrada o rompe los servicios que dependen de la caché.
+        # redis_up lo publica el exporter sidecar del propio chart Bitnami.
+        - alert: RedisCaido
+          expr: redis_up == 0
+          for: {{ .Values.alerts.redis.for }}
+          labels:
+            severity: critical
+            grupo: G8
+          annotations:
+            summary: "Redis caído ({{ `{{ $labels.pod }}` }})"
+            description: >-
+              Redis lleva {{ .Values.alerts.redis.for }} sin responder. Degrada o
+              rompe los servicios que dependen de la caché.
+            runbook: "alertas_críticas_edval.txt — G8"
+        {{- end }}
+        {{- if .Values.alerts.neo4j.enabled }}
+        # G8 · Neo4jCaido — indisponible el grafo de relaciones del espacio de datos.
+        - alert: Neo4jCaido
+          expr: up{service="{{ .Values.alerts.neo4j.service }}"} == 0
+          for: {{ .Values.alerts.neo4j.for }}
+          labels:
+            severity: critical
+            grupo: G8
+          annotations:
+            summary: "Neo4j caído"
+            description: >-
+              La base de datos de grafo lleva {{ .Values.alerts.neo4j.for }} sin
+              responder al scrapeo. Indisponible el grafo de relaciones del catálogo
+              federado.
+            runbook: "alertas_críticas_edval.txt — G8"
+        {{- end }}
+        {{- if .Values.alerts.patroni.enabled }}
+        # G8 · PostgresSinReplica — riesgo de pérdida de datos si cae el primario.
+        # NOTA: el documento propone patroni_cluster_members, que Patroni NO publica.
+        # Se expresa la misma intención con patroni_postgres_running (un gauge por
+        # miembro). El `or vector(0)` es imprescindible: sin él, si desaparecen TODOS
+        # los miembros la consulta queda vacía y la alerta no dispararía justo en el
+        # peor escenario.
+        - alert: PostgresSinReplica
+          expr: (count(patroni_postgres_running{component="pg-cluster"} == 1) or vector(0)) < {{ .Values.alerts.patroni.minMembers }}
+          for: {{ .Values.alerts.patroni.for }}
+          labels:
+            severity: critical
+            grupo: G8
+          annotations:
+            summary: "Cluster PostgreSQL con menos de {{ .Values.alerts.patroni.minMembers }} miembros vivos"
+            description: >-
+              El cluster Patroni tiene menos de
+              {{ .Values.alerts.patroni.minMembers }} miembros con Postgres arrancado.
+              Sin réplicas hay riesgo de pérdida de datos si cae el primario.
+            runbook: "alertas_críticas_edval.txt — G8"
+        {{- end }}
+    {{- end }}
+{{- end }}

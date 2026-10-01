@@ -1,0 +1,185 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-creation-wizard-api
+  labels:
+    app: sd-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sd-api
+  template:
+    metadata:
+      annotations:
+#        vault.hashicorp.com/agent-inject: "true"
+#        vault.hashicorp.com/role: "gaiax-edc_role"
+#        vault.hashicorp.com/agent-inject-secret-config.txt: "{{ .Values.vaultEnvIdentifier }}/{{ .Release.Namespace }}-sd-creation-wizard-api"
+#        vault.hashicorp.com/agent-inject-template-config.txt: |
+#          {{`{{ with secret "`}}{{ .Values.vaultEnvIdentifier }}/{{ .Release.Namespace }}{{`-sd-creation-wizard-api" }}
+#          {{ range $k, $v := .Data.data }}
+#            export {{ $k }}={{ $v }}
+#          {{ end }}
+#          {{ end }}`}}
+      labels:
+        app: sd-api
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # fixing fortify issue 'Kubernetes Misconfiguration: Service Account Token Automounted'
+      automountServiceAccountToken: false
+
+      # fixing fortify issue 'Kubernetes Misconfiguration: Improper Deployment Access Control'
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+        # El entrypoint de la imagen crea $base_dir/{shapes,schemas} y copia ahi el contenido de
+        # /home/simpluser/tmp/. Corre como uid 1001, pero el CSI de the storage backend crea la raiz del volumen
+        # como 0:0 modo 000 -> "mkdir: Permission denied" y el volumen se queda VACIO. Con fsGroup
+        # kubelet le pone gid 1001 + g+s (queda drwxrws---) y la siembra funciona. Mismo patron que
+        # redis en este mismo target storage class. En NFS (devsqs) la raiz ya venia 777, por
+        # eso alli nunca se noto. Ver embedded-application-openbao.yaml, que ya usa este par.
+        # OJO: debe coincidir con el fsGroup de xfsc-advsearch, que monta este mismo PVC RWX.
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+
+      serviceAccountName: {{ if .Values.serviceAccount }}{{ .Values.serviceAccount.name | default .Release.Name }}{{ else }}{{ .Release.Name }}{{ end }}
+
+      volumes:
+        - name: data-storage
+          persistentVolumeClaim:
+            claimName: {{ .Values.schemaVolumeClaim }}
+        - name: {{ .Release.Name }}-configmap
+          configMap:
+            name: {{ .Release.Name }}-configmap
+        {{- if .Values.caBundle.enabled }}
+        - name: ca-bundle
+          configMap:
+            name: {{ .Release.Name }}-ca-bundle
+        - name: truststore
+          emptyDir: {}
+        {{- end }}
+
+      {{- if .Values.caBundle.enabled }}
+      initContainers:
+        # El cacerts de la imagen NO es escribible (el contenedor corre como uid no root), asi que
+        # se copia a un emptyDir y se le añaden ahi las CA internas. Se reutiliza la imagen del
+        # contenedor principal porque ya trae keytool: asi no se introduce una dependencia nueva.
+        - name: build-truststore
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.pullPolicy }}
+          command: [ 'sh', '-ec' ]
+          args:
+            - |
+              cp "$JAVA_HOME/lib/security/cacerts" /truststore/cacerts
+              chmod u+w /truststore/cacerts
+              # Un fichero por certificado: keytool solo importa el primero de un PEM multiple.
+              for f in /ca/*; do
+                keytool -importcert -noprompt -alias "$(basename "$f")" \
+                  -file "$f" -keystore /truststore/cacerts -storepass changeit
+              done
+              echo "CA internas importadas:"
+              keytool -list -keystore /truststore/cacerts -storepass changeit | grep -i cnie || true
+          volumeMounts:
+            - name: ca-bundle
+              mountPath: /ca
+            - name: truststore
+              mountPath: /truststore
+      {{- end }}
+
+      containers:
+        - name: {{ .Chart.Name }}-api
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.pullPolicy }}
+          resources: {{ toYaml .Values.resources | nindent 12 }}
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+
+          volumeMounts:
+            - name: data-storage
+              mountPath: {{ .Values.schemaPvcMountPath }}
+            - name: {{ .Release.Name }}-configmap
+              mountPath: /config
+            {{- if .Values.caBundle.enabled }}
+            - name: truststore
+              mountPath: /truststore
+              readOnly: true
+            {{- end }}
+
+          env:
+            {{- if .Values.caBundle.enabled }}
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Djavax.net.ssl.trustStore=/truststore/cacerts -Djavax.net.ssl.trustStorePassword=changeit"
+            {{- end }}
+            - name: AUTHENTICATION_PROVIDER_SERVICE_URL
+              value: {{ .Values.authenticationProvider.service.url | quote }}
+
+            - name: CONNECTOR_ADAPTER_SERVICE_URL
+              value: {{ .Values.connectorAdapter.service.url | quote }}
+
+            - name: CATALOGUE_ADAPTER_TIER2_GATEWAY_URL
+              value: {{ .Values.catalogueAdapter.tier2Gateway.url | quote }}
+            - name: CATALOGUE_ADAPTER_TIER2_GATEWAY_PATH_PREFIX
+              value: {{ .Values.catalogueAdapter.tier2Gateway.pathPrefix | quote }}
+            - name: CATALOGUE_ADAPTER_MOCK_REVOKE_RESOURCE_DESCRIPTION
+              value: "false"
+
+            - name: FEDERATED_CATALOGUE_TIER2_GATEWAY_URL
+              value: {{ .Values.federatedCatalogue.tier2Gateway.url | quote }}
+            - name: FEDERATED_CATALOGUE_TIER2_GATEWAY_PATH_PREFIX
+              value: {{ .Values.federatedCatalogue.tier2Gateway.pathPrefix | quote }}
+
+            - name: HASH_CONFIG_ALGORITHM
+              value: {{ .Values.hash.config.algorithm | quote }}
+            - name: HASH_CONFIG_TEMPLATES
+              value: {{ .Values.hash.config.templates | quote }}
+            - name: HASH_CONFIG_MODELS
+              value: {{ .Values.hash.config.models | quote }}
+
+            - name: LOGGING_CONFIG
+              value: {{ .Values.log4j.config | quote }}
+
+            - name: OFFERING_TYPE_CONFIG_TEMPLATES
+              value: {{ .Values.offeringType.config.templates | quote }}
+
+            - name: OPENAPI_CONFIG_SERVERS
+              value: {{ .Values.openapiConfig.servers | quote }}
+
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.openTelemetry.otlpExporter.endpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ .Values.openTelemetry.otlpExporter.protocol | quote }}
+            - name: OTEL_PROPAGATORS
+              value: {{ .Values.openTelemetry.propagators | quote }}
+            - name: OTEL_RESOURCE_ATTRIBUTES_DEPLOYMENT_ENVIRONMENT
+              value: {{ .Values.openTelemetry.environment | quote }}
+            - name: OTEL_SDK_DISABLED
+              value: {{ .Values.openTelemetry.disabled | quote }}
+
+            - name: SCHEMA_SYNC_SERVICE_REPOSITORY_PATH
+              value: {{ .Values.schemaSyncService.repositoryPath | quote }}
+
+            - name: VALIDATION_CONFIG_ENABLED
+              value: {{ .Values.validation.config.enabled | quote }}
+            - name: VALIDATION_CONFIG_DOMAIN
+              value: {{ .Values.validation.config.domain | quote }}
+
+            - name: WEB_MVC_CORS_ALLOWED_ORIGINS
+              value: {{ .Values.web.mvc.cors.allowedOrigins | quote }}
+            - name: WEB_MVC_BEARER_TOKEN_REQUIRED
+              value: {{ .Values.web.mvc.bearerToken.required | quote }}
+            - name: WEB_MVC_BEARER_TOKEN_ALLOWED_PATHS
+              value: {{ .Values.web.mvc.bearerToken.allowedPaths | quote }}
+
+          {{- with .Values.startupProbe }}
+          startupProbe:
+{{ toYaml . | nindent 12 }}
+          {{- end }}
+
+          livenessProbe:
+{{ toYaml .Values.livenessProbe | nindent 12 }}
+
+          readinessProbe:
+{{ toYaml .Values.readinessProbe | nindent 12 }}

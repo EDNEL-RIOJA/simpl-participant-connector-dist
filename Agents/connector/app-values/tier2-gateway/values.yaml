@@ -1,0 +1,30 @@
+profile: participant
+
+service:
+  # c1/on-prem. Solo aplica cuando service.type es LoadBalancer (el default del chart).
+  #
+  # El chart trae `Local`, que preserva la IP de origen del cliente y evita un salto extra entre
+  # nodos. Es lo correcto cuando hay backend en TODOS los nodos (p.ej. APISIX, que es un DaemonSet
+  # 6/6), pero aqui detras del Service hay un Deployment de UNA replica: con kube-proxy en modo
+  # iptables (este cluster tiene kube-proxy-replacement=false), los nodos SIN backend local
+  # DESCARTAN el paquete dirigido a la IP publica. Resultado: 5 de los 6 workers no alcanzaban el
+  # tier2-gateway de los demas participantes.
+  #
+  # Eso rompia la federacion: al abrir el detalle de una oferta, el EDC pide el catalogo a la
+  # contraparte por su nombre publico (tls-participant-*) y recibia "connection refused" inmediato
+  # -> "searchCatalogOffers operation failed" en el frontal. Comprobado: la misma IP responde 403
+  # desde el nodo que aloja su backend y falla desde cualquier otro.
+  #
+  # prodauth y todos los tier2-gateway de eks-rioja ya usan Cluster.
+  # Contrapartida asumida: con Cluster hay SNAT, asi que el gateway ve la IP del nodo y no la del
+  # cliente. Para el mTLS a2a es indiferente, la identidad va en el certificado.
+  externalTrafficPolicy: Cluster
+
+redis:
+  port: "6379"
+  username: "default"
+
+microservices:
+  usersRolesUrl: http://users-roles:8080
+  keycloakUrl: http://keycloak
+  authenticationProviderUrl: http://authentication-provider:8080

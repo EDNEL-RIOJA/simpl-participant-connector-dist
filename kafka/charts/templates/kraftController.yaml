@@ -1,0 +1,31 @@
+apiVersion: platform.confluent.io/v1beta1
+kind: KRaftController
+metadata:
+  name: kraftcontroller
+spec:
+  replicas: {{ .Values.kraftController.replicas }}
+  dataVolumeCapacity: 10G
+  {{- if .Values.kraftController.storageClass.name }}
+  storageClass:
+    name: {{ .Values.kraftController.storageClass.name }}
+  {{- end }}
+  image:
+    application: {{ .Values.kraftController.image.registry }}/{{ .Values.kraftController.image.application }}:{{ .Values.kraftController.image.tag }}
+    init: {{ .Values.kraftController.image.registry }}/{{ .Values.kraftController.image.initImage }}:{{ .Values.kraftController.image.initTag }}
+  podTemplate:
+    serviceAccountName: kraftcontroller-sa
+    resources: {{- toYaml .Values.kraftController.resources | nindent 6 }}
+  configOverrides:
+    jvm:
+      - "-Xmx4g"
+      - "-XX:+UseContainerSupport"
+      - "-XX:MaxRAMPercentage=50.0"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kraftcontroller-sa
+{{- if .Values.kraftController.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml .Values.kraftController.imagePullSecrets | nindent 2 }}
+{{- end }}

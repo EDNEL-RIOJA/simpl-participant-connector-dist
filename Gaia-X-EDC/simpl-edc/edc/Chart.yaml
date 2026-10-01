@@ -1,0 +1,6 @@
+apiVersion: v2
+appVersion: 1.0.21
+description: A Helm chart for Kubernetes
+name: edc
+type: application
+version: 1.0.21

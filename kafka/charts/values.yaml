@@ -1,0 +1,118 @@
+kafka:
+  image:
+    registry: ghcr.io/cnie-es
+    application: cp-server
+    tag: 8.0.1
+    initImage: confluent-init-container
+    initTag: 3.0.1
+  imagePullSecrets:
+    - name: github-registry-secret
+  replicas: 3
+  topic:
+    replicas: 2
+    insyncreplicas: 1
+    autocreate: true
+  auth:
+    enabled: false
+    # Method for providing SASL credentials: "vault" (HashiCorp Vault injection) or "kubernetes" (K8s Secret)
+    secretMethod: "kubernetes"
+    # Name of the Kubernetes secret containing JAAS config (used when secretMethod is "kubernetes")
+    secretName: "kafka-jaas-secret"
+  # Listeners configuration
+  listeners:
+    # Internal listener - no TLS, fast internal communication
+    internal:
+      # Optional: Override the advertised host
+      advertisedHost: ""
+    # TLS listener - secure internal network access
+    tls:
+      enabled: false
+      # Port for TLS listener (default: 9094)
+      port: 9094
+      # Optional: Override the advertised host
+      advertisedHost: ""
+      # Secret containing TLS certificate
+      secretRef: ""
+      # Generate certificate using cert-manager
+      certManager:
+        enabled: false
+        issuerRef: ""
+        issuerKind: "ClusterIssuer"
+        duration: "2160h"
+        renewBefore: "360h"
+    # External listener - LoadBalancer for external access
+    external:
+      enabled: false
+      # Port for external listener (default: 9093)
+      port: 9093
+      # Domain for external access (e.g., telefonicadev.com)
+      domain: ""
+      # Advertised port for external clients
+      advertisedPort: 9093
+      # Annotations for LoadBalancer service
+      annotations: {}
+      # TLS configuration
+      tls:
+        enabled: false
+        secretRef: ""
+    # Per-broker listeners - each broker gets unique access
+    perBroker:
+      enabled: false
+      # Routing type: "port" or "host"
+      # - port: same host, different ports (kafka.local:9096, kafka.local:9097, kafka.local:9098)
+      # - host: different hosts, same port (kafka0.local:9096, kafka1.local:9096, kafka2.local:9096)
+      routingType: "port"
+      # For port-based routing: host for all brokers
+      host: "host.docker.internal"
+      # For host-based routing: domain suffix and broker prefix (e.g., kafka0.local, kafka1.local)
+      domain: "local"
+      brokerPrefix: "kafka"
+      # Plaintext per-broker listener
+      plaintext:
+        port: 9096
+        portOffset: 9096  # Only used for port-based routing
+      # TLS per-broker listener
+      tls:
+        port: 9099
+        portOffset: 9099  # Only used for port-based routing
+        secretRef: ""
+  serviceAccount:
+    enabled: true
+    name: kafka-sa
+  resources:
+    requests:
+      cpu: 1
+      memory: 2Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  storageClass:
+    name: ""
+  clusterLink: false
+  balancer: false
+
+kraftController:
+  replicas: 3
+  image:
+    registry: ghcr.io/cnie-es
+    application: cp-server
+    tag: 8.0.1
+    initImage: confluent-init-container
+    initTag: 3.0.1
+  imagePullSecrets:
+    - name: github-registry-secret
+  resources:
+    requests:
+      cpu: 1
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 2Gi
+  storageClass:
+    name: ""
+
+hashicorp:
+  service: "http://vaultservice.vaultns.svc.cluster.local:8200"
+  role: "accessrole_name"
+  secretEngine: name
+  secretConfigPath: "{{ .Values.hashicorp.secretEngine }}/{{ .Release.Namespace }}-kafka-credentials"

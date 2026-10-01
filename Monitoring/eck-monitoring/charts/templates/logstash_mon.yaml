@@ -1,0 +1,172 @@
+{{- if eq .Values.namespaceTag .Values.mainNamespace }}
+apiVersion: logstash.k8s.elastic.co/v1alpha1
+kind: Logstash
+metadata:
+  name: logstash-mon
+  labels:
+    app: logstash
+  annotations:
+    helm.sh/hook-weight: "10"
+spec:
+  image: {{ .Values.logstash.image }}:{{ default .Values.elasticVersion  .Values.logstash.imageTag }}
+  version: {{ .Values.elasticVersion }}
+  count: 1
+  elasticsearchRefs:
+  - name: {{ .Release.Name }}-elasticsearch
+    clusterName: {{ .Release.Name }}-elasticsearch
+  monitoring:
+    logs:
+      elasticsearchRefs:
+        - name: {{ .Release.Name }}-elasticsearch
+    metrics:
+      elasticsearchRefs:
+        - name: {{ .Release.Name }}-elasticsearch
+  volumeClaimTemplates:
+    - metadata:
+        name: logstash-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            {{- if eq .Values.deploy_minimal_stack true }}
+            storage: {{ .Values.logstash.minimal_stack_diskSpace }}
+            {{- else }}
+            storage: {{ .Values.logstash.diskSpace }}
+            {{- end }}
+        storageClassName: {{ .Values.logstash.storageClassName }}
+  services:
+    - name: hpa
+      service:
+        spec:
+          ports:
+          - port: 5044
+            name: hpa
+            targetPort: 5044
+  podTemplate:
+    metadata:
+      labels:
+        stack-namespace: {{ .Release.Namespace }} 
+    spec:
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: logstash
+        {{- with .Values.logstash.resources_logstash_mon }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        volumeMounts:
+        {{- range .Values.logstash.mon.pipelines }}
+        - name: pipeline-config-{{- .name }}
+          mountPath: /app/elastic/logstash/config/pipelines/{{- .name -}}.config
+          subPath: {{ .name -}}.config
+        {{- end }}
+        - name: es-certs
+          mountPath: /usr/share/logstash/config/certs
+        - name: certs-logstash
+          mountPath: /usr/share/logstash/certs-logstash
+        env:
+          - name: LS_JAVA_OPTS
+            {{- $memoryStr :=regexReplaceAllLiteral "[a-zA-Z]?" .Values.logstash.resources_logstash_mon.limits.memory "" }}
+            {{- $memory := int $memoryStr }}
+            value: "-Xms{{ div $memory 2 }}g -Xmx{{ div $memory 2 }}g"
+          - name: LOGSTASH_USER
+            valueFrom:
+              secretKeyRef:
+                name: logstash-writer-secret
+                key: username
+          - name: LOGSTASH_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: logstash-writer-secret
+                key: password 
+          - name: ELASTIC_ELASTICSEARCH_ES_HOSTS
+            value: 'https://{{ .Release.Name }}-elasticsearch-es-http.{{ .Release.Namespace }}.svc:9200'
+          - name: ELASTICSEARCH_SSL_CERTIFICATE_VERIFICATION
+            value: "true"
+          - name: ELASTICSEARCH_SSL_CA_PATH
+            value: "/usr/share/logstash/config/certs/ca.crt"
+          - name: LOGSTASH_ALERTS_EMAIL_RECEIVER
+            value: {{ (index .Values.logstash.mon.pipelines 0).email_receiver }}
+          - name: LOGSTASH_KAFKA_BOOTSTRAP_SERVERS
+            value: kafka.{{ .Values.mainNamespace }}.svc.cluster.local:9072
+          - name: LOGSTASH_KAFKA_SECURITY_PROTOCOL
+            value: {{ .Values.logstash.mon.kafka.security_protocol }}
+          - name: LOGSTASH_ALERTS_KAFKA_TOPIC_ID
+            value: {{ (index .Values.logstash.mon.pipelines 0).topic_id }}
+          - name: LOGSTASH_INFRASTRUCTURE_KAFKA_TOPIC_ID
+            value: {{ (index .Values.logstash.mon.pipelines 1).topic_id }}
+      - name: filebeat
+        image: {{ .Values.filebeat.image }}:{{ default .Values.elasticVersion .Values.filebeat.imageTag }}
+        {{- with .Values.logstash.resources_filebeat }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      - name: metricbeat
+        image: {{ default "docker.elastic.co/beats/metricbeat" .Values.metricbeat.image }}:{{ default .Values.elasticVersion .Values.metricbeat.imageTag }}
+        {{- with .Values.logstash.resources_metricbeat }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      volumes:
+      {{- range .Values.logstash.mon.pipelines }}
+      - name: pipeline-config-{{- .name }}
+        configMap:
+          name: logstash-{{- .pipelines_group_name -}}-{{- .name -}}-config
+          defaultMode: 511
+      {{- end }}
+      - name: es-certs
+        secret:
+          secretName: {{ .Release.Name }}-elasticsearch-http-cert-secret-internal
+      - name: certs-logstash
+        secret:
+          secretName: logstash-hpa-certs-secret-{{ .Release.Namespace }}
+  pipelinesRef:
+    secretName: logstash-mon-pipelines-yml
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: logstash-mon-pipelines-yml
+data:
+  pipelines.yml: |
+   {{ tpl .Values.logstash.pipelines_yml_config $ | nindent 6 | b64enc }}
+---
+{{- range .Values.logstash.mon.pipelines }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-{{ .pipelines_group_name }}-{{ .name }}-config
+data:
+  {{ .name }}.config: |
+    {{- tpl .input $ | nindent 4 }}
+    {{- tpl .filter $ | nindent 4 }}
+    {{- tpl .output $ | nindent 4 }}
+---
+{{- end }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: logstash-hpa-certificate-{{ .Release.Namespace }}
+spec:
+  duration: {{ .Values.logstash.cert.duration }}
+  renewBefore: {{ .Values.logstash.cert.renewBefore }}
+  commonName: "logstash-hpa.{{ .Release.Namespace }}.svc.cluster.local"
+  secretName: logstash-hpa-certs-secret-{{ .Release.Namespace }}
+  dnsNames:
+    - "logstash-mon-ls-hpa.{{ .Release.Namespace }}.svc.cluster.local"
+    - "logstash-mon-ls-hpa"
+  issuerRef:
+    name: elk-clusterissuer-{{ .Release.Namespace }}
+    kind: ClusterIssuer
+  privateKey:
+    encoding: "PKCS8" 
+---
+{{- end }}

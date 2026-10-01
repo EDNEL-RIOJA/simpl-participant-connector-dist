@@ -1,0 +1,57 @@
+---
+vaultEnvIdentifier: dev-int
+schemaVolumeClaim: nfs-storage-pvc-sd
+schemaPvcMountPath: "/data"
+authenticationProvider:
+  service:
+    url: http://authentication-provider:8080
+federatedCatalogue:
+  tier2Gateway:
+    pathPrefix: "/fc"
+catalogueAdapter:
+  tier2Gateway:
+    pathPrefix: "/adapter"
+participant:
+  onboarding:
+    credentialPassword: ''
+web:
+  mvc:
+    cors:
+      allowedOrigins: ''
+env:
+  PUBLIC_AGENT_TYPE: provider
+ingress:
+  enabled: false
+startupProbe:
+  httpGet:
+    path: "/actuator/health/readiness"
+    port: 8080
+    httpHeaders:
+    - name: Accept
+      value: application/json
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 24
+livenessProbe:
+  httpGet:
+    path: "/actuator/health/liveness"
+    port: 8080
+    httpHeaders:
+    - name: Accept
+      value: application/json
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: "/actuator/health/readiness"
+    port: 8080
+    httpHeaders:
+    - name: Accept
+      value: application/json
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 6
+serviceAccount:
+  name: xfsc-advsearch-be-sa

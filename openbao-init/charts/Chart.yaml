@@ -1,0 +1,3 @@
+name: openbao-init
+version: 1.4.4
+description: OpenBao initialization and configuration with transit auto-unseal support, automatic Kubernetes auth configuration, and periodic sync via CronJob

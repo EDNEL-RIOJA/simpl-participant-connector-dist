@@ -1,0 +1,10 @@
+apiVersion: argoproj.io/v1alpha1
+kind: EventBus
+metadata:
+  name: provisioner-eventbus
+  namespace: {{ .Release.Namespace }}
+spec:
+  nats:
+    native:
+      replicas: 2
+      auth: token

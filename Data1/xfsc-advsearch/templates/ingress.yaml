@@ -1,0 +1,29 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}.{{ .Release.Namespace }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    {{- if not (.Values.ingress.tls | default dict).secretName }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer }}
+    acme.cert-manager.io/http01-edit-in-place: "true"
+    {{- end }}
+    kubernetes.io/ingress.class: {{ .Values.ingress.ingressClass }}
+spec:
+  tls:
+    - hosts:
+        - {{ .Release.Name }}.{{ .Release.Namespace }}.{{ .Values.domain}}
+      secretName: {{ (.Values.ingress.tls | default dict).secretName | default "xfsc-advsearch-be-tls" }}
+  rules:
+    - host: {{ .Release.Name }}.{{ .Release.Namespace }}.{{ .Values.domain}}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}
+                port:
+                  number: {{ .Values.servicePort}}
+{{- end }}

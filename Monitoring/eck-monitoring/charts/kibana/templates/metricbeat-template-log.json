@@ -1,0 +1,16 @@
+{
+    "index_patterns": ["metricbeat-*"],
+    "data_stream": {
+        "hidden": false,
+        "allow_custom_routing": false
+    },
+    "composed_of": [],
+    "priority": 200,
+    "template": {
+      "settings": {
+        "index.lifecycle.name": "metricbeat-ilm",
+        "index.number_of_shards": 1,
+        "index.number_of_replicas": 0
+      }
+    }
+  }

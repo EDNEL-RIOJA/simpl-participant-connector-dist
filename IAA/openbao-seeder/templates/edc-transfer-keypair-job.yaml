@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: edc-transfer-keypair
+  namespace: {{ .Values.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        security.banzaicloud.io/mutate: "skip"
+        security.bank-vaults.io/mutate: "skip"
+    spec:
+      serviceAccountName: openbao-seeder-sa
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecretName }}
+      containers:
+      - name: create-edc-transfer-keypair
+        image: {{ .Values.kubectl.image }}
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            if kubectl get secret edc-transfer-key -n {{ .Values.namespace }} > /dev/null 2>&1; then
+              echo "edc-transfer-key Secret already exists, skipping."
+              exit 0
+            fi
+            echo "Generating RSA-2048 keypair for EDC transfer proxy..."
+            command -v openssl >/dev/null 2>&1 || apk add --no-cache openssl >/dev/null
+            EDC_PRIVKEY=$(openssl genrsa 2048 2>/dev/null)
+            EDC_PUBKEY=$(printf '%s' "$EDC_PRIVKEY" | openssl rsa -pubout 2>/dev/null)
+            kubectl create secret generic edc-transfer-key \
+              -n {{ .Values.namespace }} \
+              --from-literal=private="$EDC_PRIVKEY" \
+              --from-literal=public="$EDC_PUBKEY"
+            echo "edc-transfer-key Secret created."

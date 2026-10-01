@@ -1,0 +1,16 @@
+apiVersion: v2
+name: observability
+description: |
+  Observabilidad Prometheus del agente: blackbox-exporter (sondeo de los frontales e
+  ingress desde fuera, como los ve un usuario), objetos de descubrimiento para el
+  Prometheus Operator EXTERNO (Probe / PodMonitor) y las reglas de alerta críticas
+  del espacio de datos.
+
+  Solo contiene alertas cuya métrica existe hoy. Lo que sigue bloqueado por una
+  dependencia (rebuild de imagen, métricas del EDC, componentes fuera de este repo)
+  está documentado en MONITORIZACION-PENDIENTE.md, no como regla muda.
+
+  Documento de origen: alertas_críticas_edval.txt
+type: application
+version: 0.1.0
+appVersion: "0.28.0"

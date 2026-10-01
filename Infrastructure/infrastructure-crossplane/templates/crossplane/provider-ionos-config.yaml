@@ -1,0 +1,11 @@
+{{/*apiVersion: ionoscloud.crossplane.io/v1alpha1*/}}
+{{/*kind: ProviderConfig*/}}
+{{/*metadata:*/}}
+{{/*  name: {{ .Release.Namespace }}-ionos-pc*/}}
+{{/*spec:*/}}
+{{/*  credentials:*/}}
+{{/*    source: Secret*/}}
+{{/*    secretRef:*/}}
+{{/*      namespace: {{ .Release.Namespace }}*/}}
+{{/*      name: ionos-provider-crossplane*/}}
+{{/*      key: credentials*/}}

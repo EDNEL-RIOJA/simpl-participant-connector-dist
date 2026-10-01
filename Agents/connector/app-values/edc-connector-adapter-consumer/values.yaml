@@ -1,0 +1,63 @@
+# specify 'dev' for dev environment or 'int' for integration environment
+domainUrlEnvIdentifier: int
+
+serviceAccount:
+   # optional service account prefix
+   prefix:
+   # El sufijo -sa NO es cosmetico: el rol simpl-secrets-role de OpenBao solo admite las SA que
+   # casen con bound_service_account_names ("*-sa", "*-service-account", "*-service",
+   # "*-consumption-be", "*-svc-account", "*<ultima letra del ns common>", "default", "keycloak",
+   # "edc-connector-adapter", "rabbitmq"). Ver openbao-init/charts/templates/initjob.yaml.
+   #
+   # Sin sufijo, el nombre por defecto (= .Release.Name) es "edc-connector-adapter-consumer", que no
+   # casa con ninguno: vault-env recibe 403 "service account name not authorized", agota su espera de
+   # 10 s y mata el contenedor -> CrashLoopBackOff. El provider se libra solo porque su nombre esta
+   # listado literalmente ("edc-connector-adapter").
+   name: edc-connector-adapter-consumer-sa
+
+openTelemetry:
+  # disables the OpenTelemetry SDK (true on local dev)
+  disabled: false
+  # used to identify the environment
+  environment: int
+
+profile: consumer
+
+edcConnector:
+  # the participant id to be used as assigner in policies as expected by the EDC connector on contract negotiation
+  participantId: consumer
+  # Conector EDC HIBRIDO unico (management :19193). Sobrescrito igualmente desde
+  # application.yaml del umbrella; se mantiene coherente aqui.
+  baseUrl: http://simpl-edc-service:19193
+  apiKey: apikey
+
+kafka:
+  consumer:
+    groupId: contract_consumption
+  auth:
+    type: SASL_PLAINTEXT
+  fatalIfBrokerNotAvailable: false
+
+pullPolicy: Always
+
+appJarPath: "/home/simpluser/app.jar"
+
+ingress:
+  enabled: false
+
+# Spring Boot tarda ~60s en arrancar; startupProbe da hasta 5 min antes de habilitar liveness.
+startupProbe:
+  initialDelaySeconds: 20
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 30
+
+livenessProbe:
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+readinessProbe:
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3

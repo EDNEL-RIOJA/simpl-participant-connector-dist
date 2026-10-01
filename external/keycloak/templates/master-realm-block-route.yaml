@@ -1,0 +1,70 @@
+{{- /*
+Capa 1 del aislamiento del realm master: cierra en el host PUBLICO las rutas de
+administracion de Keycloak. Se activa solo con adminRealmAccess=internal (el
+deployer rellena masterRealmPublicBlock), asi que dev/stage/test no se enteran.
+
+POR QUE HACE FALTA, si el frontendUrl ya apunta al host interno: el frontendUrl
+rompe el flujo de NAVEGADOR (el codigo de autorizacion redirige a un host que no
+resuelve fuera de la VPN), pero NO el de API. Medido el 30/08/2026 sobre prodauth (el patron es identico en los participantes):
+
+  POST /auth/realms/master/protocol/openid-connect/token  -> 401 invalid_grant
+  GET  /auth/admin/realms/master                          -> 401
+  GET  /auth/admin/master/console/                        -> 200
+
+El 401 del token es "credenciales malas", no "prohibido": el endpoint procesa la
+peticion. Con credenciales validas, cualquiera desde internet obtiene un token de
+admin de master y con el le responde /auth/admin/**.
+
+fault-injection con abort 404, y no redirect: en rutas de API un 302 a la home es
+raro, y el 404 ademas no confirma que el recurso exista.
+
+OJO: el plugin se llama `fault-injection`. `request-termination` es de KONG, no
+de APISIX; usarlo deja la ApisixRoute en Accepted=False reason=SyncFailed con
+"400 Bad Request, error_msg: unknown plugin [request-termination]" -- y el
+recurso existe en Kubernetes, asi que parece aplicado pero NO corta nada. Se
+detecta mirando .status.conditions de la ApisixRoute, no su existencia.
+
+Notas de APISIX (las tres nos han mordido antes):
+- ingressClassName: apisix es OBLIGATORIO; sin el, el controlador ignora la
+  ApisixRoute y no la sincroniza al data plane.
+- la priority tiene que ganar a la de la ruta que sirve /auth (simpl-ingress,
+  un Ingress -> priority 0). 100 es la convencion ya usada en el namespace
+  (prodauth-blocked-paths, services-gnoss-rewrite).
+- backends es obligatorio en la CRD aunque el plugin corte antes del upstream.
+
+NO se toca el realm del participante: sus usuarios siguen entrando por el host
+publico. Y con adminRealmAccess=public (default) este template no emite nada, asi
+que los participantes EXTERNOS no tienen que hacer absolutamente nada.
+*/ -}}
+{{- if .Values.masterRealmPublicBlock.enabled }}
+{{- if not .Values.masterRealmPublicBlock.host }}
+{{- fail "masterRealmPublicBlock.enabled=true requiere masterRealmPublicBlock.host (el host publico donde se cierra la administracion)" }}
+{{- end }}
+apiVersion: apisix.apache.org/v2
+kind: ApisixRoute
+metadata:
+  name: {{ include "common.names.fullname" . }}-master-realm-blocked
+  namespace: {{ .Release.Namespace }}
+spec:
+  ingressClassName: apisix
+  http:
+    - name: master-realm-blocked
+      priority: {{ .Values.masterRealmPublicBlock.priority }}
+      match:
+        hosts:
+          - {{ .Values.masterRealmPublicBlock.host | quote }}
+        paths:
+          {{- range .Values.masterRealmPublicBlock.paths }}
+          - {{ . | quote }}
+          {{- end }}
+      backends:
+        - serviceName: {{ include "common.names.fullname" . }}
+          servicePort: {{ .Values.service.ports.http }}
+      plugins:
+        - name: fault-injection
+          enable: true
+          config:
+            abort:
+              http_status: {{ .Values.masterRealmPublicBlock.statusCode }}
+              body: ""
+{{- end }}

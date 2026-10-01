@@ -1,0 +1,7 @@
+logging:
+  business:
+    - method: POST
+      path: /transfers
+      config:
+        operations:
+          - START_TRANSFER

@@ -1,0 +1,109 @@
+serviceAccount:
+  name: sdtooling-api-be-service-account
+
+# ID of persistentVolumeClaims associated with NFS Storage
+schemaVolumeClaim: nfs-storage-pvc-sd
+
+# configuration for connectivity between SD-Tooling-Api-Be and SD-Tooling-Api-Validation
+validation:
+  config:
+    domain: "http://sd-validation:8080"
+
+connectorAdapter:
+  service:
+    url:  http://edc-connector-adapter:8080
+
+# url to the AuthenticationProvider internal service
+authenticationProvider:
+  service:
+    url: http://authentication-provider:8080
+
+openTelemetry:
+  disabled: true
+
+# catalog adapter application (catalogue-adapter-service)
+catalogueAdapter:
+  tier2Gateway:
+    # tier2 tls gateway path configured as route rule to the catalog adapter application
+    pathPrefix: /adapter
+
+# federated catalog application (fc-service)
+federatedCatalogue:
+  tier2Gateway:
+    # URI to the tier2 tls gateway of the federated catalog application
+    # tier2 tls gateway path configured as route rule to the federated catalog application
+    pathPrefix: /fc
+
+ingress:
+  enabled: false
+
+startupProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+    httpHeaders:
+      - name: Accept
+        value: application/json
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 24
+
+livenessProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+    httpHeaders:
+      - name: Accept
+        value: application/json
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+    httpHeaders:
+      - name: Accept
+        value: application/json
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 6
+
+# El HashService descarga por HTTPS la plantilla de contrato (hash.config.templates) para
+# hashearla. En los entornos con dominio interno ese host lo firma la CA privada de CNIE y sin
+# esto publicar una oferta devuelve 500 con "PKIX path building failed". Mismas CA que simpl-edc.
+caBundle:
+  enabled: true
+  certificates:
+    private-ca.crt: |
+      -----BEGIN CERTIFICATE-----
+      MIICHzCCAaagAwIBAgIUWVGDHpEoKfilxGUXbVHliphJaQowCgYIKoZIzj0EAwIw
+      SjELMAkGA1UEBhMCRVMxETAPBgNVBAgMCExhIFJpb2phMREwDwYDVQQKDAhGVFIt
+      Q05JRTEVMBMGA1UEAwwMQ05JRSBSb290IENBMB4XDTI2MDUyNjEyMzk0MloXDTMx
+      MDUyNTEyMzk0MlowTjELMAkGA1UEBhMCRVMxETAPBgNVBAgMCExhIFJpb2phMREw
+      DwYDVQQKDAhGVFItQ05JRTEZMBcGA1UEAwwQQ05JRSBJbnRlcm5hbCBDQTBZMBMG
+      ByqGSM49AgEGCCqGSM49AwEHA0IABGzpmXBiepiOYmeO8vqT3rKU/Cg3FiNc0UYO
+      iQwxSeojX1Z4Uu48tYQtf6LsZuUfHcabXx9Gyow0z/6IlSKqSVWjZjBkMB0GA1Ud
+      DgQWBBS1QvJfcVkiDYJRt93dcPXbmKLyuzAfBgNVHSMEGDAWgBSexJ7EmRY1Js2c
+      CfxsMl+u4YViJDASBgNVHRMBAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwIBBjAK
+      BggqhkjOPQQDAgNnADBkAjAXzWZ779NheCdVIfO90e27yqEnArdLmZX+J2AWWENn
+      1KETZQe2t6Y7rMY6IDeZESQCME+RZDOYgaYGlqukaq93cCLBN0EKJmlHwLzD6xc0
+      yV1hQErXOC7+nAvs0hI5Ui/qpw==
+      -----END CERTIFICATE-----
+    cnie-root.crt: |
+      -----BEGIN CERTIFICATE-----
+      MIICNjCCAbygAwIBAgIUWFPi/bjWhtnxI5x/50ZGq3HLzgswCgYIKoZIzj0EAwIw
+      SjELMAkGA1UEBhMCRVMxETAPBgNVBAgMCExhIFJpb2phMREwDwYDVQQKDAhGVFIt
+      Q05JRTEVMBMGA1UEAwwMQ05JRSBSb290IENBMB4XDTI2MDUyNjEyMzg0NloXDTM2
+      MDUyMzEyMzg0NlowSjELMAkGA1UEBhMCRVMxETAPBgNVBAgMCExhIFJpb2phMREw
+      DwYDVQQKDAhGVFItQ05JRTEVMBMGA1UEAwwMQ05JRSBSb290IENBMHYwEAYHKoZI
+      zj0CAQYFK4EEACIDYgAE4Mlndl2L6yYCNU9cT7L8C8eC0+Hc29Zwc7BNrdXuyim5
+      ECHeRHpBkXNyN+LrVAJ3twzVOZ29X3tfkYuy1rk43pProPtNwUVxD2tt0o/leznU
+      XoXwu5Go0MKoR+hhMEb7o2MwYTAdBgNVHQ4EFgQUnsSexJkWNSbNnAn8bDJfruGF
+      YiQwHwYDVR0jBBgwFoAUnsSexJkWNSbNnAn8bDJfruGFYiQwDwYDVR0TAQH/BAUw
+      AwEB/zAOBgNVHQ8BAf8EBAMCAQYwCgYIKoZIzj0EAwIDaAAwZQIwZgUzbpf/kh0R
+      NBXwUVawCcbhqY3dIwBZFpsa3fyHIvg0FosWpSQuSmvCXzqzqCu/AjEAjbi2MsNZ
+      7xuLemY5ycsP1xMeLS8ORdPLICQ81Qkgzvwc3svI1DFeYrzGGNBtHm43
+      -----END CERTIFICATE-----

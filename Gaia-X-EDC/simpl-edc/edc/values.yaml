@@ -1,0 +1,173 @@
+deployment:
+  image: "ghcr.io/cnie-es/gaia-x-edc-simpl-edc"
+  tag: "1.0.21"
+
+# Extra env vars appended to the simpl-edc container `env:`. List of standard
+# k8s envvar objects (supports `value:` and `valueFrom:`). The deployment
+# template `toYaml`s this verbatim, so dotted/dashed names work fine since
+# they bypass the vault-agent `source` config.txt (which would reject them
+# as invalid bash identifiers).
+extraEnvVars: []
+
+# La JVM, sin esto, se queda con el 25% del limite de memoria del contenedor
+# (MaxRAMPercentage por defecto): con limits.memory=500Mi el heap eran ~126 MB y
+# las transferencias S3 de ficheros grandes morian con OutOfMemoryError.
+# Se inyecta como -XX:MaxRAMPercentage dentro de JAVA_TOOL_OPTIONS.
+jvm:
+  maxRamPercentage: 75
+  # Opciones JVM libres, se anaden a la MISMA JAVA_TOOL_OPTIONS que el resto
+  # (ver el comentario del deployment: en los args no, porque hay dos ramas).
+  # Ej: "-Xss2m -XX:+ExitOnOutOfMemoryError"
+  opts: ""
+
+# COMO SE APUNTA EL EDC AL S3 ON-PREM (the storage backend). Leer antes de tocar nada de S3.
+#
+# El endpoint va en el DataAddress de la oferta, NO en el entorno del pod:
+#
+#   origen  {"type":"AmazonS3","bucketName":"edval-<ns>","objectName":"...",
+#            "region":"us-east-1","endpointOverride":"https://s3.example.invalid"}
+#   destino {...lo mismo..., "keyName":"edval-<ns-destino>"}
+#
+# Esa es la forma con la que prod hace transferencias que COMPLETAN, y la que se valido en stage
+# el 2026-08-31: 3 GiB copiados entre participantes, 48 partes de 64 MiB.
+#
+# NO anadir AWS_ENDPOINT_URL, AWS_ENDPOINT_URL_S3, AWS_ENDPOINT_URL_STS ni
+# AWS_S3_FORCE_PATH_STYLE al pod. Parece lo obvio y ROMPE la transferencia:
+#
+#   - Esas variables actuan a nivel de SDK y construyen la URL en virtual-host style
+#     (<bucket>.<endpoint>), pisando el camino del EDC, que con endpointOverride en el
+#     DataAddress usa path-style.
+#   - Con ellas puestas la transferencia muere en
+#     "java.net.UnknownHostException: edval-<ns>.s3.example.invalid": ese nombre ni resuelve en el
+#     DNS interno ni esta en el certificado de the storage backend, cuyos SAN son solo s3.example.invalid y
+#     the storage backend01..08.example.invalid (no hay comodin).
+#   - AWS_S3_FORCE_PATH_STYLE no lo respeta esta version del SDK, asi que tampoco compensa.
+#
+# Sintomas y que significan, por si aparecen otra vez:
+#   "The AWS Access Key Id you provided does not exist in our records" con un Request ID de AWS
+#       -> falta el endpointOverride: el data plane se esta yendo a Amazon de verdad con
+#          credenciales de the storage backend.
+#   "UnknownHostException: <bucket>.s3.example.invalid"
+#       -> hay alguna AWS_ENDPOINT_URL* puesta; quitarla.
+#   "StsException: The security token included in the request is invalid" al provisionar
+#       -> el rol de STS del consumer (edc_aws_provision_sts_role_arn, sembrado desde
+#          <ns>-edc-s3-credentials/AWS_PROVISION_STS_ROLE_ARN) esta vacio.
+#
+# Troceado multipart de las transferencias S3.
+#
+# EL PROBLEMA: sin estos limites el data plane buferea el objeto COMPLETO en
+# memoria antes de subirlo. Es lo que tumbo las transferencias grandes en prod
+# on-prem con OutOfMemoryError (el maxRamPercentage de arriba subio el heap, pero
+# no cambia que el objeto entre entero en memoria: solo mueve el techo).
+# Con el troceado, la huella pasa a ser ~un chunk, no el fichero.
+#
+# EL COMPROMISO: chunk mas grande = menos peticiones y mas throughput, pero mas
+# memoria por transferencia concurrente. 64 MB va sobrado para 1Gi de limite y
+# permite objetos de hasta 640 GB (S3 admite 10.000 partes por multipart).
+#
+# sessionDurationSeconds: el STS de la transferencia caduca a la hora por
+# defecto. Si un multipart tarda mas, las credenciales mueren a mitad y la
+# transferencia NO se puede reanudar. 43200 = 12 h (el maximo del EDC es 129600).
+# Ojo: esto solo tapa el sintoma; la causa de que tarde tanto suele ser el
+# `resources.limits.cpu` de abajo cifrando TLS con un cuarto de core.
+#
+# Poner cualquiera a null para no emitir esa variable y dejar el default del EDC.
+s3:
+  sinkChunkSizeMb: 64
+  # OJO: entre comillas. Sin ellas Helm lo trata como float y lo renderiza como
+  # "6.7108864e+07", que el EDC no parsea.
+  chunkSizeBytes: "67108864"   # 64 MiB, en linea con sinkChunkSizeMb
+  sessionDurationSeconds: 43200
+
+# OJO: cuando el chart se despliega desde Agents/connector (el caso normal), MANDA el
+# bloque `simpl_edc.resources` de Agents/connector/charts/values.yaml y esto de aqui NO
+# se aplica. Mirar alli antes de cambiar limites.
+resources:
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  limits:
+    cpu: 250m
+    memory: 1Gi
+  requests:
+    cpu: 250m
+    memory: 1Gi
+
+
+ingress:
+  enabled: true
+  apiPath: /api
+  managementPath: /management
+  protocolPath: /protocol
+  publicPath: /public
+  controlPath: /control
+  clusterIssuer: dev-prod
+  # tls.secretName vacio = Let's Encrypt per-host (default, via clusterIssuer);
+  # con valor = usa ese Secret/SealedSecret TLS (p.ej. "vallelengua-tls") y NO emite
+  # con LE. Aplica a ESTE ingress y al public (override comun). Ver tier1-gateway.
+  tls:
+    secretName: ""
+  corsAllowOrigin: "*"
+  # Dedicated public-only Ingress for the EDC dataplane public endpoint
+  # (publicPort/publicPath). Kept separate from the all-ports Ingress above so
+  # the dataplane public API (authenticated by its own EDR token) is exposed on
+  # its own host without also exposing management/control/api. Activated and
+  # parameterized per participant from Agents/<role>/charts application.yaml.
+  publicEndpoint:
+    enabled: false
+    host: ""
+    clusterIssuer: ""
+    tlsSecretName: ""
+    # External URL announced to counterparties as edc.dataplane.api.public.baseurl
+    # (e.g. https://public-be-<participant>.example.org/public).
+    baseUrl: ""
+
+contractmanager:
+  extension:
+    enabled: false
+  # Contract Manager unico, usado para ambos roles de negociacion (fallback legacy).
+  url: http://url:8080/contract/v1/
+  # Opcional (conector hibrido, feature/hybrid-edc de simpl-edc): Contract Manager por rol.
+  # Si se definen, las negociaciones tipo CONSUMER firman contra consumerUrl y las tipo
+  # PROVIDER contra providerUrl (prevalecen sobre `url`). Vacio = fallback a `url`.
+  consumerUrl: ""
+  providerUrl: ""
+
+serviceAccount:
+  enabled: true
+
+hashicorp:
+  role: "gaiax"
+  service: "https://vault.tools.simpl-europe.eu/"
+
+secretEngine: kv/gaia-x
+secretConfigPath: "{{ .Values.secretEngine }}/{{ .Release.Namespace }}-simpl-edc"
+
+imagePullSecrets:
+  - name: github-registry-secret
+
+# CA adicionales para el truststore del JVM. Apagado por defecto: el comportamiento del chart no
+# cambia si no se activa desde app-values.
+#
+# Necesario cuando el EDC habla TLS contra un servicio firmado por una CA privada (p.ej. el S3 de
+# the storage backend en on-prem): el cacerts de la imagen solo trae CA publicas y el handshake muere con
+# "PKIX path building failed: unable to find valid certification path to requested target".
+#
+# Hay que incluir la RAIZ, no solo la intermedia: los servidores no suelen enviar la raiz en la
+# cadena, y es la que hace de ancla de confianza.
+#
+# Un certificado por clave; el nombre de la clave se usa como alias en el keystore:
+#   certificates:
+#     mi-root.crt: |
+#       -----BEGIN CERTIFICATE-----
+#       ...
+caBundle:
+  enabled: false
+  certificates: {}
+
+# Fijar donde puede planificarse el pod. Util cuando solo algunos nodos tienen acceso al
+# almacenamiento con el que habla el data plane.
+nodeSelector: {}
+affinity: {}
+tolerations: []

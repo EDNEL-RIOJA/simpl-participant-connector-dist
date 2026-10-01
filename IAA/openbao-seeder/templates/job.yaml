@@ -1,0 +1,353 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openbao-seeder
+  namespace: {{ .Values.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        security.banzaicloud.io/mutate: "skip"
+        security.bank-vaults.io/mutate: "skip"
+    spec:
+      serviceAccountName: openbao-seeder-sa
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecretName }}
+      containers:
+      - name: seeder
+        image: ghcr.io/cnie-es/openbao:2.4.3
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+
+            VAULT_ADDR="http://openbao-${COMMON_NS}.${COMMON_NS}.svc.cluster.local:8200"
+            export VAULT_ADDR
+
+            SA_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+            VAULT_TOKEN=$(bao write -field=token auth/kubernetes/login \
+              role="${SECRET_ROLE}" \
+              jwt="${SA_TOKEN}")
+            export VAULT_TOKEN
+
+            # postgres passwords (from local Zalando secrets)
+            bao kv put -mount="${SECRET_ENGINE}" "${NAMESPACE}-postgres-passwords" \
+              "${NAMESPACE}-authenticationprovider=${AP_PASS}" \
+              "${NAMESPACE}-keycloak=${KC_PASS}" \
+              "${NAMESPACE}-usersroles=${UR_PASS}" \
+              "${NAMESPACE}-edc=${EDC_PASS}" \
+              "${NAMESPACE}-contract=${CONTRACT_PASS}" \
+              "${NAMESPACE}-infrabe=${INFRABE_PASS}" \
+              "${NAMESPACE}-dagster=${DAGSTER_PASS}"
+
+            # kafka passwords (from common vault)
+            KAFKA_CONTRACT=$(bao kv get -field="${NAMESPACE}_contract" \
+              "${SECRET_ENGINE}/${COMMON_NS}-kafka-credentials")
+            KAFKA_INFRABE=$(bao kv get -field="${NAMESPACE}_infrabe" \
+              "${SECRET_ENGINE}/${COMMON_NS}-kafka-credentials")
+            # Consumer-side apps brought over for the hybrid agent: their fields
+            # may not exist yet in the common credentials store, so these are
+            # read best-effort (empty on failure) instead of aborting the whole
+            # seeder under `set -e`.
+            KAFKA_EDCCONN=$(bao kv get -field="${NAMESPACE}_edcconn" \
+              "${SECRET_ENGINE}/${COMMON_NS}-kafka-credentials" 2>/dev/null || true)
+            KAFKA_CONTRACT_CONSUMPTION=$(bao kv get -field="${NAMESPACE}_contract_consumption" \
+              "${SECRET_ENGINE}/${COMMON_NS}-kafka-credentials" 2>/dev/null || true)
+            KAFKA_CONTRACT_CONSUMER=$(bao kv get -field="${NAMESPACE}_contract_consumer" \
+              "${SECRET_ENGINE}/${COMMON_NS}-kafka-credentials" 2>/dev/null || true)
+
+            # contract (DB + kafka)
+            bao kv put -mount="${SECRET_ENGINE}" "${NAMESPACE}-contract" \
+              API_KEY="apikey" \
+              DB_URL="jdbc:postgresql://pg-cluster.${NAMESPACE}.svc.cluster.local:5432/${NAMESPACE}_contract" \
+              DB_USER="${NAMESPACE}_contract" \
+              DBPASSWORD="${CONTRACT_PASS}" \
+              KAFKA_CLIENT_PASSWORDS="${KAFKA_CONTRACT}" \
+              KAFKA_CLIENT_USER="${NAMESPACE}_contract"
+
+            # edc-connector-adapter (consumer-profile instance, hybrid agent)
+            if [ -n "${KAFKA_EDCCONN}" ]; then
+              bao kv put -mount="${SECRET_ENGINE}" "${NAMESPACE}-edc-connector-adapter" \
+                KAFKA_AUTH_SASL_PASSWORD="${KAFKA_EDCCONN}" \
+                KAFKA_AUTH_SASL_USERNAME="${NAMESPACE}_edcconn"
+            else
+              echo "WARNING: ${NAMESPACE}_edcconn not found in ${COMMON_NS}-kafka-credentials, skipping ${NAMESPACE}-edc-connector-adapter"
+            fi
+
+            # edc-connector-adapter-consumer (2nd EDC Connector Adapter instance,
+            # profile=consumer, hybrid agent). Read by application.yaml's
+            # edc_connector_adapter_consumer block at vault path
+            # "${NAMESPACE}-edc-connector-adapter-consumer". Reuses the same
+            # ${NAMESPACE}_edcconn kafka client as the provider-profile instance
+            # above since it's the same logical EDC Kafka client, just a second pod.
+            if [ -n "${KAFKA_EDCCONN}" ]; then
+              bao kv put -mount="${SECRET_ENGINE}" "${NAMESPACE}-edc-connector-adapter-consumer" \
+                KAFKA_AUTH_SASL_PASSWORD="${KAFKA_EDCCONN}" \
+                KAFKA_AUTH_SASL_USERNAME="${NAMESPACE}_edcconn"
+            else
+              echo "WARNING: ${NAMESPACE}_edcconn not found in ${COMMON_NS}-kafka-credentials, skipping ${NAMESPACE}-edc-connector-adapter-consumer"
+            fi
+
+            # contract-consumption-be (consumer-profile instance, hybrid agent)
+            if [ -n "${KAFKA_CONTRACT_CONSUMPTION}" ]; then
+              bao kv put -mount="${SECRET_ENGINE}" "${NAMESPACE}-contract-consumption-be" \
+                KAFKA_AUTH_SASL_PASSWORD="${KAFKA_CONTRACT_CONSUMPTION}" \
+                KAFKA_AUTH_SASL_USERNAME="${NAMESPACE}_contract_consumption"
+            else
+              echo "WARNING: ${NAMESPACE}_contract_consumption not found in ${COMMON_NS}-kafka-credentials, skipping ${NAMESPACE}-contract-consumption-be"
+            fi
+
+            # contract-consumer (2nd Contract Manager BE instance, CONSUMER mode,
+            # hybrid agent). Needs its own postgres user/db
+            # (<namespace>_contract_consumer) provisioned by the postgres-cluster
+            # chart (external repo, EDNEL-RIOJA/postgres-cluster) and its own
+            # kafka creds field (<namespace>_contract_consumer) in the common
+            # kafka-credentials store (seeded by common/authority-side tooling,
+            # not in this repo). Until both exist this is skipped with a
+            # warning instead of failing the seeder.
+            if [ -n "${CONTRACT_CONSUMER_PASS}" ] && [ -n "${KAFKA_CONTRACT_CONSUMER}" ]; then
+              bao kv put -mount="${SECRET_ENGINE}" "${NAMESPACE}-contract-consumer" \
+                API_KEY="apikey" \
+                DB_URL="jdbc:postgresql://pg-cluster.${NAMESPACE}.svc.cluster.local:5432/${NAMESPACE}_contract_consumer" \
+                DB_USER="${NAMESPACE}_contract_consumer" \
+                DBPASSWORD="${CONTRACT_CONSUMER_PASS}" \
+                KAFKA_CLIENT_PASSWORDS="${KAFKA_CONTRACT_CONSUMER}" \
+                KAFKA_CLIENT_USER="${NAMESPACE}_contract_consumer"
+            else
+              echo "WARNING: ${NAMESPACE}-contract-consumer prerequisites missing (postgres user and/or kafka credentials not yet provisioned), skipping"
+            fi
+
+            # infrastructure-be (DB + kafka + static config)
+            bao kv put -mount="${SECRET_ENGINE}" "${NAMESPACE}-infrastructure-be" \
+              "gitea.token=" \
+              "infrastructure.api.config.value=Bearer " \
+              "kafka.sasl.enabled=true" \
+              "kafka.sasl.password=${KAFKA_INFRABE}" \
+              "kafka.sasl.username=${NAMESPACE}_infrabe" \
+              "spring.datasource.password=${INFRABE_PASS}" \
+              "spring.datasource.username=${NAMESPACE}_infrabe" \
+              "spring.mail.password=" \
+              "spring.mail.username=no-reply@simplservices.com" \
+              "vault.token=${VAULT_TOKEN}"
+
+            # infra-adapter-simpl-backend (signer config — VAULT_TOKEN is
+            # generated once and must not be rotated, so we only seed when the
+            # path doesn't exist. VAULT_ADRESS is patched on every run because
+            # historic seeds didn't include it (signer pelaba con
+            # `unsupported protocol scheme ""`). Note: the env var consumed by
+            # the signer binary is misspelled `VAULT_ADRESS` (one D) — see
+            # https://code.europa.eu/simpl/simpl-open/development/gaia-x-edc/simpl-signer
+            # deployment guide.
+            if ! bao kv get -mount="${SECRET_ENGINE}" "${NAMESPACE}-infra-adapter-simpl-backend" > /dev/null 2>&1; then
+              bao kv put -mount="${SECRET_ENGINE}" "${NAMESPACE}-infra-adapter-simpl-backend" \
+                ENGINE_PATH="/opt/plugins/hashicorp-vault-provider.so" \
+                HTTP_HOST="" \
+                HTTP_IDLE_TIMEOUT="120s" \
+                HTTP_PORT="8080" \
+                HTTP_READ_TIMEOUT="10s" \
+                HTTP_WRITE_TIMEOUT="10s" \
+                LOG_ENCODING="json" \
+                LOG_LEVEL="debug" \
+                VAULT_ADRESS="${VAULT_ADDR}" \
+                VAULT_TOKEN="${VAULT_TOKEN}"
+            fi
+            # Always patch VAULT_ADRESS so already-seeded participants pick it
+            # up too. Idempotent: leaves every other field untouched.
+            bao kv patch -mount="${SECRET_ENGINE}" "${NAMESPACE}-infra-adapter-simpl-backend" \
+              VAULT_ADRESS="${VAULT_ADDR}"
+
+            # redis (from local redis-secrets created by common openbao_ednel)
+            bao kv put -mount="${SECRET_ENGINE}" "${NAMESPACE}-redis" \
+              redis="${REDIS_PASS}" \
+              rediscommander="${REDIS_COMMANDER_PASS}"
+
+            # S3 credentials for simpl-edc (per-participant, pre-seeded in vault)
+            # Fuente unica: ${SECRET_ENGINE}/${NAMESPACE}-edc-s3-credentials
+            # Campos: fr_gxfs_s3_access_key, fr_gxfs_s3_secret_key, fr_gxfs_s3_endpoint (MinIO fr.gxfs),
+            #         AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION (AWS S3 data plane),
+            #         AWS_PROVISION_STS_ROLE_ARN (solo consumer; provisioning STS).
+            # OJO al nombre con el que se ESCRIBE en ${NAMESPACE}-simpl-edc: las claves de ese
+            # secreto acaban siendo variables de entorno del EDC, y el EDC traduce entorno ->
+            # propiedad bajando a minusculas y cambiando "_" por ".". Necesita
+            # edc.aws.provision.sts.role.arn, luego la clave debe llamarse
+            # edc_aws_provision_sts_role_arn. Con AWS_PROVISION_STS_ROLE_ARN salia
+            # aws.provision.sts.role.arn (sin el "edc.") y el EDC nunca la encontraba:
+            # NullPointerException "roleArn" antes de intentar nada.
+            # Las AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION si van con el nombre
+            # pelado a proposito: esas las lee el SDK de AWS, no el EDC.
+            # El seeder los copia a ${NAMESPACE}-simpl-edc, que es de donde simpl-edc los lee
+            # (source /vault/secrets/config.txt). Cada campo se copia solo si existe en el origen.
+            EDC_S3_ACCESS_KEY=""
+            EDC_S3_SECRET_KEY=""
+            EDC_S3_ENDPOINT=""
+            AWS_ACCESS_KEY_ID=""
+            AWS_SECRET_ACCESS_KEY=""
+            AWS_REGION=""
+            EDC_STS_ROLE_ARN=""
+            if bao kv get "${SECRET_ENGINE}/${NAMESPACE}-edc-s3-credentials" > /dev/null 2>&1; then
+              EDC_S3_ACCESS_KEY=$(bao kv get -field="fr_gxfs_s3_access_key" "${SECRET_ENGINE}/${NAMESPACE}-edc-s3-credentials")
+              EDC_S3_SECRET_KEY=$(bao kv get -field="fr_gxfs_s3_secret_key" "${SECRET_ENGINE}/${NAMESPACE}-edc-s3-credentials")
+              EDC_S3_ENDPOINT=$(bao kv get -field="fr_gxfs_s3_endpoint" "${SECRET_ENGINE}/${NAMESPACE}-edc-s3-credentials")
+              AWS_ACCESS_KEY_ID=$(bao kv get -field="AWS_ACCESS_KEY_ID" "${SECRET_ENGINE}/${NAMESPACE}-edc-s3-credentials" 2>/dev/null || true)
+              AWS_SECRET_ACCESS_KEY=$(bao kv get -field="AWS_SECRET_ACCESS_KEY" "${SECRET_ENGINE}/${NAMESPACE}-edc-s3-credentials" 2>/dev/null || true)
+              AWS_REGION=$(bao kv get -field="AWS_REGION" "${SECRET_ENGINE}/${NAMESPACE}-edc-s3-credentials" 2>/dev/null || true)
+              EDC_STS_ROLE_ARN=$(bao kv get -field="AWS_PROVISION_STS_ROLE_ARN" "${SECRET_ENGINE}/${NAMESPACE}-edc-s3-credentials" 2>/dev/null || true)
+              echo "Loaded S3 credentials for simpl-edc"
+            else
+              echo "WARNING: ${NAMESPACE}-edc-s3-credentials not found in vault, simpl-edc S3 fields will be empty"
+            fi
+
+            # simpl-edc (idempotent - creates if not exists)
+            if ! bao kv get -mount="${SECRET_ENGINE}" "${NAMESPACE}-simpl-edc" > /dev/null 2>&1; then
+              bao kv put -mount="${SECRET_ENGINE}" "${NAMESPACE}-simpl-edc" \
+                contractmanager_apikey="apikey" \
+                edc_datasource_default_password="${EDC_PASS}" \
+                edc_datasource_policy_password="${EDC_PASS}" \
+                edc_ionos_access_key="" \
+                edc_ionos_endpoint="s3-eu-central-1.ionoscloud.com" \
+                edc_ionos_endpoint_region="de" \
+                edc_ionos_secret_key="" \
+                edc_ionos_token="" \
+                fr_gxfs_s3_access_key="${EDC_S3_ACCESS_KEY}" \
+                fr_gxfs_s3_secret_key="${EDC_S3_SECRET_KEY}" \
+                fr_gxfs_s3_endpoint="${EDC_S3_ENDPOINT}" \
+                AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+                AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+                AWS_REGION="${AWS_REGION}" \
+                edc_aws_provision_sts_role_arn="${EDC_STS_ROLE_ARN}"
+            fi
+
+            # Always patch S3 fields so updates take effect on re-sync
+            if [ -n "${EDC_S3_ACCESS_KEY}" ]; then
+              bao kv patch -mount="${SECRET_ENGINE}" "${NAMESPACE}-simpl-edc" \
+                fr_gxfs_s3_access_key="${EDC_S3_ACCESS_KEY}" \
+                fr_gxfs_s3_secret_key="${EDC_S3_SECRET_KEY}" \
+                fr_gxfs_s3_endpoint="${EDC_S3_ENDPOINT}"
+            fi
+
+            # AWS S3 data-plane creds (AWS SDK default chain). Patch guardado para
+            # participantes ya existentes, donde el put de creacion no vuelve a correr.
+            if [ -n "${AWS_ACCESS_KEY_ID}" ]; then
+              bao kv patch -mount="${SECRET_ENGINE}" "${NAMESPACE}-simpl-edc" \
+                AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+                AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+                AWS_REGION="${AWS_REGION}"
+            fi
+
+            # STS role ARN para provisioning S3 (solo consumer; el data-provider no
+            # lo usa, su origen no lo tiene -> este bloque queda no-op).
+            # El nombre lleva el prefijo edc_ a proposito: ver la nota de arriba.
+            if [ -n "${EDC_STS_ROLE_ARN}" ]; then
+              bao kv patch -mount="${SECRET_ENGINE}" "${NAMESPACE}-simpl-edc" \
+                edc_aws_provision_sts_role_arn="${EDC_STS_ROLE_ARN}"
+            fi
+
+            # gen_pw: password ALEATORIO de 32 chars del charset alfanumerico +
+            # subset seguro de especiales [-_.~], reintentando hasta que tenga
+            # >=1 minuscula, >=1 mayuscula, >=1 digito y >=1 especial. Cumple la
+            # policy del realm en --import-realm (upperCase/lowerCase/digits(1))
+            # y tambien la del realm vivo tras el hardening (specialChars(1)).
+            # El especial se limita a [-_.~] (unreserved de URL): no necesita
+            # escaping en JSON/shell/envsubst ni rompe consumidores que usen la
+            # password en URLs. El generador plano anterior no garantizaba clases
+            # (~6% sin digito) y keycloak fallaba con invalidPasswordMinDigitsMessage.
+            gen_pw() {
+              while :; do
+                _p=$(tr -dc 'A-Za-z0-9_.~-' < /dev/urandom | head -c 32)
+                case "$_p" in *[a-z]*)
+                  case "$_p" in *[A-Z]*)
+                    case "$_p" in *[0-9]*)
+                      case "$_p" in *[_.~-]*)
+                        printf '%s' "$_p"; return 0 ;;
+                      esac ;;
+                    esac ;;
+                  esac ;;
+                esac
+              done
+            }
+            # keycloak passwords (idempotent - generated once)
+            #
+            # Solo 'admin', la del admin del propio Keycloak. NO se generan
+            # admin_dataprovider ni op_dataprovider: esos dos usuarios ya no
+            # nacen con password. El realm los crea con UPDATE_PASSWORD y
+            # CONFIGURE_TOTP pendientes y Keycloak les manda un correo para que
+            # la pongan ellos, asi que una password aqui no la leeria nadie y
+            # seria un secreto vivo de una cuenta con permisos.
+            # (En la authority se mantiene el comportamiento anterior:
+            # admin.authority y op.authority siguen con su password en OpenBao.)
+            if ! bao kv get -mount="${SECRET_ENGINE}" "${NAMESPACE}-keycloak" > /dev/null 2>&1; then
+              ADMIN_PASS=$(gen_pw)
+              bao kv put -mount="${SECRET_ENGINE}" "${NAMESPACE}-keycloak" \
+                admin="${ADMIN_PASS}"
+            fi
+
+            echo "Seeder completed for ${NAMESPACE}"
+        env:
+          - name: NAMESPACE
+            value: {{ .Values.namespace | quote }}
+          - name: COMMON_NS
+            value: {{ .Values.commonNamespace | quote }}
+          - name: SECRET_ENGINE
+            value: {{ .Values.secretEngine | quote }}
+          - name: SECRET_ROLE
+            value: {{ .Values.secretRole | quote }}
+          - name: AP_PASS
+            valueFrom:
+              secretKeyRef:
+                name: "{{ .Values.namespace }}-authenticationprovider.pg-cluster.credentials.postgresql.acid.zalan.do"
+                key: password
+          - name: KC_PASS
+            valueFrom:
+              secretKeyRef:
+                name: "{{ .Values.namespace }}-keycloak.pg-cluster.credentials.postgresql.acid.zalan.do"
+                key: password
+          - name: UR_PASS
+            valueFrom:
+              secretKeyRef:
+                name: "{{ .Values.namespace }}-usersroles.pg-cluster.credentials.postgresql.acid.zalan.do"
+                key: password
+          - name: EDC_PASS
+            valueFrom:
+              secretKeyRef:
+                name: "{{ .Values.namespace }}-edc.pg-cluster.credentials.postgresql.acid.zalan.do"
+                key: password
+          - name: CONTRACT_PASS
+            valueFrom:
+              secretKeyRef:
+                name: "{{ .Values.namespace }}-contract.pg-cluster.credentials.postgresql.acid.zalan.do"
+                key: password
+          # optional: true because this secret only exists once the
+          # postgres-cluster chart (external repo) provisions the
+          # <namespace>_contract_consumer DB user for this participant; until
+          # then this resolves to an empty value instead of blocking the pod.
+          - name: CONTRACT_CONSUMER_PASS
+            valueFrom:
+              secretKeyRef:
+                name: "{{ .Values.namespace }}-contract-consumer.pg-cluster.credentials.postgresql.acid.zalan.do"
+                key: password
+                optional: true
+          - name: INFRABE_PASS
+            valueFrom:
+              secretKeyRef:
+                name: "{{ .Values.namespace }}-infrabe.pg-cluster.credentials.postgresql.acid.zalan.do"
+                key: password
+          - name: DAGSTER_PASS
+            valueFrom:
+              secretKeyRef:
+                name: "{{ .Values.namespace }}-dagster.pg-cluster.credentials.postgresql.acid.zalan.do"
+                key: password
+          - name: REDIS_PASS
+            valueFrom:
+              secretKeyRef:
+                name: redis-secrets
+                key: redis
+          - name: REDIS_COMMANDER_PASS
+            valueFrom:
+              secretKeyRef:
+                name: redis-secrets
+                key: commander

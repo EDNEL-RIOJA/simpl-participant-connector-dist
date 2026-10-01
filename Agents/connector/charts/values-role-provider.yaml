@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Overlay de ROL: PROVIDER puro
+# ─────────────────────────────────────────────────────────────────────────────
+# Selecciona este overlay cuando el conector actúa SOLO como data-provider.
+# El EDC sigue siendo la imagen híbrida (una instancia simpl-edc capaz de ambos
+# roles); este overlay únicamente desactiva los servicios auxiliares exclusivos
+# del lado consumer, que un provider puro no necesita.
+#
+# Uso en el deployer (Argo Application → helm.valueFiles). El overlay de ROL va SIEMPRE el
+# último, para que tenga la última palabra sobre chIngest (ver abajo):
+#   valueFiles:
+#     - values.yaml                 # base = HÍBRIDO (todo activado)
+#     - values-external.yaml        # (opcional) si es self-hosted / externo
+#     - values-role-provider.yaml   # ← este overlay (SIEMPRE el último)
+#
+# NOTA: la base (values.yaml sin overlay de rol) es el modo HÍBRIDO — el que se
+# despliega en AIBD2. Los overlays de rol solo se usan para conectores de rol único.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Componentes exclusivos del lado CONSUMER → off en un provider puro:
+contract_consumer:
+  enabled: false
+edc_connector_adapter_consumer:
+  enabled: false
+simpl_edc_consumer:
+  enabled: false
+simpl_catalogue_client:
+  enabled: false
+contract_consumption_be:
+  enabled: false
+
+# Un provider puro NO alimenta la Clearing House (los records de consumo los genera el lado
+# consumer). Desactivamos el forwarder aunque el overlay de ubicación externa lo hubiese activado
+# → por eso este overlay de ROL debe aplicarse DESPUÉS de values-external.yaml (último = gana).
+chIngest:
+  enabled: false

@@ -1,0 +1,117 @@
+{{- if .Values.signerTokenRefresh.enabled }}
+# PARCHE TEMPORAL — reinicio programado del signer.
+#
+# El signer carga su motor de firma UNA SOLA VEZ al arrancar:
+#   main.go:67  Start Service with Engine /opt/plugins/hashicorp-vault-provider.so
+#   main.go:76  Load Engine...
+# Ese plugin lee el token de OpenBao en ese instante y se lo queda EN MEMORIA; despues no vuelve a
+# mirar /vault/secrets/token. vault-agent si renueva y reescribe el fichero ("renewed auth token" en
+# su log), pero el signer ya no lo lee.
+#
+# El token tiene creation_ttl=86400 (24 h exactas). Al caducar el que el plugin retiene, toda
+# operacion contra transit falla con:
+#   "error making credential proof ... error getting signing key: unsupported operation (...): not found"
+# Ese "not found" es como el plugin traduce un rechazo: consultando con el token del fichero, OpenBao
+# responde "permission denied". La clave gaia-x-key1 NO falta.
+#
+# El fallo es ciclico y SILENCIOSO: el pod sigue 2/2 Running, sin reinicios, y solo falla al firmar.
+# Recrear el pod lo arregla porque el plugin relee un token fresco.
+#
+# El arreglo de fondo es que el plugin relea el token en cada operacion — codigo upstream de SIMPL.
+# Esto solo contiene el sintoma. RETIRAR cuando SIMPL lo corrija.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: signer-token-refresh
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+imagePullSecrets:
+  - name: github-registry-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: signer-token-refresh
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+rules:
+  # patch es lo que necesita `kubectl rollout restart` (anota la plantilla del Deployment).
+  # get/list/watch, para que `rollout status` espere al resultado: sin `watch` funciona igual pero
+  # cae a polling y ensucia el log del Job con un "Failed to watch ... forbidden" por cada intento,
+  # que en una revision futura se lee como si el CronJob estuviera roto.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: signer-token-refresh
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: signer-token-refresh
+subjects:
+  - kind: ServiceAccount
+    name: signer-token-refresh
+    namespace: {{ .Values.cluster.namespace }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: signer-token-refresh
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  schedule: {{ .Values.signerTokenRefresh.schedule | quote }}
+  # Forbid: si una ejecucion se alarga, no se solapa con la siguiente.
+  concurrencyPolicy: Forbid
+  # Si el controlador estuvo caido mas de esta ventana, se salta la ejecucion en vez de encadenar
+  # arranques atrasados.
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  # Se guardan 3 fallidos: con una sola ventana cada 24 h frente a un TTL de 24 h, si un reinicio no
+  # cuaja hay que poder verlo despues.
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: signer-token-refresh
+          imagePullSecrets:
+            - name: github-registry-secret
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: refresh
+              image: {{ .Values.signerTokenRefresh.image | quote }}
+              command: [/bin/sh, -ec]
+              args:
+                - |
+                  # `rollout status` no es decorativo: sin el, un reinicio que no cuaja terminaria
+                  # con exit 0 y el Job pareceria correcto. Justo el fallo silencioso que se mitiga.
+                  kubectl -n {{ .Values.cluster.namespace }} rollout restart deploy/{{ .Values.signerTokenRefresh.deploymentName }}
+                  kubectl -n {{ .Values.cluster.namespace }} rollout status deploy/{{ .Values.signerTokenRefresh.deploymentName }} --timeout=300s
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+{{- end }}

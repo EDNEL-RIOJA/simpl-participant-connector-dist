@@ -1,0 +1,93 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: decommission
+  namespace: {{ .Release.Namespace }}
+spec:
+  eventBusName: provisioner-eventbus
+  template:
+    serviceAccountName: provisioner-events
+  dependencies:
+    - name: message
+      eventSourceName: decommission
+      eventName: decommissionRequest
+  triggers:
+    - rateLimit:
+        unit: Second
+        requestsPerUnit: 1
+      template:
+        name: argo-workflow-trigger
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: decommission-
+                namespace: {{ .Release.Namespace }}
+              spec:
+                podGC:
+                  strategy: OnPodCompletion
+                  deleteDelayDuration: 60s
+                serviceAccountName: provisioner-workflows
+                synchronization:
+                  mutex:
+                    name: gitops-write
+                entrypoint: main
+                workflowMetadata:
+                  labels:
+                    operation: decommission
+                    observer: "true"
+                  labelsFrom:
+                    uuid:
+                      expression: workflow.parameters.scriptTriggerId
+                arguments:
+                  parameters:
+                    - name: scriptTriggerId
+                      value: default-is-overriden
+                    - name: provisioningMechanism
+                      value: default-is-overriden
+                templates:
+                  - name: main
+                    container:
+                      imagePullPolicy: IfNotPresent
+                      image: {{ .Values.gitopsWorkflowImage }}
+                      env:
+                        - name: GIT_USER
+                          valueFrom:
+                            secretKeyRef:
+                              name: gitea-secret
+                              key: username
+                        - name: GIT_PASSWORD
+                          valueFrom:
+                            secretKeyRef:
+                              name: gitea-secret
+                              key: password
+                        - name: GIT_URL
+                          value: {{ .Values.giteaUrl }}
+                        - name: NAMESPACE
+                          value: {{ .Release.Namespace }}
+                        - name: UUID
+                          value: {{`"{{workflow.parameters.scriptTriggerId}}"`}}
+                        - name: MECHANISM
+                          value: {{`"{{workflow.parameters.provisioningMechanism}}"`}}
+                      command: [python]
+                      args: [ "main.py", "decommission" ]
+                      workingDir: /app
+                    outputs:
+                      parameters:
+                        - name: log
+                          valueFrom:
+                            path: /tmp/output.log
+          parameters:
+            - src:
+                dependencyName: message
+                dataKey: headers.scriptTriggerId
+                value: ""
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: message
+                dataKey: headers.provisioningMechanism
+                value: ""
+              dest: spec.arguments.parameters.1.value

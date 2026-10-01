@@ -1,0 +1,214 @@
+{
+  "priority": 300,
+  "template": {
+    "settings": {
+      "index": {
+        "lifecycle": {
+          "name": "metricbeat-hpa-ilm"
+        }
+      }
+    },
+    "mappings": {
+      "properties": {
+        "@timestamp": {
+          "type": "date"
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "text",
+              "fields": {
+                "keyword": {
+                  "ignore_above": 256,
+                  "type": "keyword"
+                }
+              }
+            }
+          }
+        },
+        "hpa_item": {
+          "type": "object",
+          "properties": {
+            "metadata": {
+              "type": "object",
+              "properties": {
+                "creationTimestamp": {
+                  "type": "date"
+                },
+                "name": {
+                  "type": "keyword"
+                },
+                "namespace": {
+                  "type": "keyword"
+                },
+                "resourceVersion": {
+                  "type": "keyword"
+                }
+              }
+            },
+            "spec": {
+              "type": "object",
+              "properties": {
+                "maxReplicas": {
+                  "type": "long"
+                },
+                "metrics": {
+                  "dynamic": true,
+                  "type": "object",
+                  "enabled": true,
+                  "subobjects": true,
+                  "properties": {
+                    "resource_name": {
+                      "type": "keyword"
+                    },
+                    "target_averageUtilization": {
+                      "type": "long"
+                    },
+                    "target_type": {
+                      "type": "keyword"
+                    },
+                    "type": {
+                      "type": "keyword"
+                    }
+                  }
+                },
+                "minReplicas": {
+                  "type": "long"
+                },
+                "scaleTargetRef": {
+                  "type": "object",
+                  "properties": {
+                    "apiVersion": {
+                      "type": "keyword"
+                    },
+                    "kind": {
+                      "type": "keyword"
+                    },
+                    "name": {
+                      "type": "keyword"
+                    }
+                  }
+                }
+              }
+            },
+            "status": {
+              "type": "object",
+              "properties": {
+                "conditions": {
+                  "dynamic": true,
+                  "type": "object",
+                  "enabled": true,
+                  "subobjects": true,
+                  "properties": {
+                    "lastTransitionTime": {
+                      "type": "date"
+                    },
+                    "message": {
+                      "type": "text"
+                    },
+                    "reason": {
+                      "type": "keyword"
+                    },
+                    "status": {
+                      "type": "keyword"
+                    },
+                    "type": {
+                      "type": "keyword"
+                    }
+                  }
+                },
+                "currentMetrics": {
+                  "dynamic": true,
+                  "type": "object",
+                  "enabled": true,
+                  "subobjects": true,
+                  "properties": {
+                    "resource": {
+                      "type": "object",
+                      "properties": {
+                        "current": {
+                          "type": "object",
+                          "properties": {
+                            "averageUtilization": {
+                              "type": "long"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "resource_name": {
+                      "type": "keyword"
+                    },
+                    "type": {
+                      "type": "keyword"
+                    }
+                  }
+                },
+                "currentReplicas": {
+                  "type": "long"
+                },
+                "desiredReplicas": {
+                  "type": "long"
+                },
+                "lastScaleTime": {
+                  "type": "date"
+                }
+              }
+            }
+          }
+        },
+        "http": {
+          "type": "object",
+          "properties": {
+            "kubernetes_hpa": {
+              "type": "object",
+              "properties": {
+                "apiVersion": {
+                  "type": "keyword"
+                },
+                "kind": {
+                  "type": "keyword"
+                },
+                "metadata_resourceVersion": {
+                  "type": "keyword"
+                }
+              }
+            }
+          }
+        },
+        "log_type": {
+          "type": "keyword"
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "additionalInfo": {
+              "type": "text"
+            },
+            "source": {
+              "type": "keyword"
+            },
+            "timestamp": {
+              "type": "keyword"
+            }
+          }
+        },
+        "tags": {
+          "type": "keyword"
+        },
+        "to": {
+          "type": "keyword"
+        }
+      }
+    }
+  },
+  "index_patterns": [
+    "metricbeat-hpa-reports"
+  ],
+  "data_stream": {
+    "hidden": false,
+    "allow_custom_routing": false
+  },
+  "ignore_missing_component_templates": []
+}

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: workflow-provision
+spec:
+  selector:
+    app: workflow-provision
+  ports:
+    - protocol: TCP
+      port: 12100
+      targetPort: 12100
+  type: ClusterIP

@@ -1,0 +1,9 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: terraform-data
+spec:
+  interval: 1m0s
+  url: http://{{ .Values.giteaUrl }}/{{ .Values.secrets.gitea.username }}/data-repo.git
+  ref:
+    branch: master

@@ -1,0 +1,158 @@
+{{- if .Values.embeddedCommon.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-sa
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+imagePullSecrets:
+  - name: github-registry-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openbao-sa-token-reviewer-{{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+- kind: ServiceAccount
+  name: openbao-sa
+  namespace: {{ .Values.cluster.namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openbao-auth-config
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+rules:
+- apiGroups: [""]
+  resources: ["serviceaccounts/token"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["serviceaccounts"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openbao-auth-config
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openbao-auth-config
+subjects:
+- kind: ServiceAccount
+  name: openbao-sa
+  namespace: {{ .Values.cluster.namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openbao-auth-config
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    # Run after openbao-init-trigger (sync-wave 1) so secrets-root-token exists
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 5
+  template:
+    metadata:
+      name: openbao-auth-config
+    spec:
+      serviceAccountName: openbao-sa
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: github-registry-secret
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: configure-auth
+        image: ghcr.io/cnie-es/openbao:2.4.3
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: ROOT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: secrets-root-token
+              key: token
+        - name: OPENBAO_SA_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: openbao-sa-token
+              key: token
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+
+          export VAULT_ADDR=http://openbao-{{ .Values.cluster.namespace }}:8200
+          export VAULT_TOKEN="${ROOT_TOKEN}"
+          unset VAULT_NAMESPACE
+          unset BAO_NAMESPACE
+
+          echo "=== Waiting for OpenBao to be ready ==="
+          max_attempts=30
+          attempt=0
+          while [ $attempt -lt $max_attempts ]; do
+            if bao status > /dev/null 2>&1; then
+              echo "OpenBao is ready!"
+              break
+            fi
+            echo "Waiting for OpenBao... (attempt $((attempt+1))/$max_attempts)"
+            sleep 5
+            attempt=$((attempt+1))
+          done
+
+          if [ $attempt -eq $max_attempts ]; then
+            echo "ERROR: OpenBao not ready after $max_attempts attempts"
+            exit 1
+          fi
+
+          echo "=== Configuring Kubernetes Auth ==="
+
+          # Check if Kubernetes auth is enabled, if not enable it
+          if ! bao auth list | grep -q "kubernetes/"; then
+            echo "Enabling Kubernetes auth..."
+            bao auth enable kubernetes
+          fi
+
+          # Configure Kubernetes auth
+          # Use long-lived token from Secret instead of projected token
+          K8S_CA_CERT=$(cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt)
+          K8S_HOST="https://kubernetes.default.svc"
+          SA_TOKEN="${OPENBAO_SA_TOKEN}"
+
+          bao write auth/kubernetes/config \
+              token_reviewer_jwt="$SA_TOKEN" \
+              kubernetes_host="$K8S_HOST" \
+              kubernetes_ca_cert="$K8S_CA_CERT" \
+              disable_iss_validation=true
+
+          echo "=== Creating/Updating simpl-secrets-role ==="
+
+          # Create or update the role for simpl-common
+          bao write auth/kubernetes/role/{{ .Values.secrets.secretEngine }}-role \
+              bound_service_account_names="*" \
+              bound_service_account_namespaces="{{ .Values.cluster.namespace }}{{- range .Values.agentList.authorities }},{{ . }}{{- end }}{{- range .Values.agentList.consumers }},{{ . }}{{- end }}{{- range .Values.agentList.providers }},{{ . }}{{- end }}" \
+              policies="{{ .Values.secrets.secretEngine }}-policy" \
+              token_ttl="24h" \
+              token_period="24h"
+
+          echo "=== OpenBao Kubernetes Auth Configuration Complete ==="
+{{- end }}

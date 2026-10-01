@@ -1,0 +1,18 @@
+{{- if .Values.kafka.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{ .Values.namespace }}
+  name: {{ include "infra-backend.fullname" . }}-kafka-ui
+  labels:
+    app: kafka-ui
+    release: {{ .Release.Name }}
+spec:
+  type: {{ .Values.kafkaUi.service.type }}
+  ports:
+    - port: {{ .Values.kafkaUi.service.port }}
+      targetPort: 8080
+  selector:
+    app: kafka-ui
+    release: {{ .Release.Name }}
+{{- end }}    

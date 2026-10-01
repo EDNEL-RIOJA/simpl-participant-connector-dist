@@ -1,0 +1,76 @@
+---
+image:
+  repository: ghcr.io/cnie-es/iaa-cli
+  pullPolicy: IfNotPresent
+  tag: 2.2.3
+imagePullSecrets:
+- name: github-registry-secret
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1001
+envFrom:
+- configMapRef:
+    name: simpl-cli-configmap
+initAuthority:
+  enabled: false
+  hostT1: t1.{{ .Release.Namespace }}.dev.simpl-europe.eu
+  csr:
+    cn: t2.{{ .Release.Namespace }}.dev.simpl-europe.eu
+    o: aruba
+    ou: aruba-dev
+    country: IT
+  ejbca:
+    internalHost: ejbca-community-helm.{{ .Release.Namespace }}.svc.cluster.local
+    internalPort: 30443
+  keycloak:
+    internalHost: keycloak.{{ .Release.Namespace }}.svc.cluster.local
+    internalPort: 80
+    url: https://{{ tpl .Values.initAuthority.hostT1 . }}/auth
+    app:
+      realm: authority
+      clientId: cli
+      clientSecret:
+    master:
+      realm: master
+      user: admin
+      password: ''
+      clientId: admin-cli
+  microservices:
+    usersRolesUrl: https://{{ tpl .Values.initAuthority.hostT1 . }}/cli/userApi/
+    securityAttributesProviderUrl: https://{{ tpl .Values.initAuthority.hostT1 . }}/cli/sapApi/
+    identityProviderUrl: https://{{ tpl .Values.initAuthority.hostT1 . }}/cli/identityApi/
+    authenticationProviderUrl: https://{{ tpl .Values.initAuthority.hostT1 . }}/cli/authApi/
+initParticipant:
+  enabled: false
+  ptype: CONSUMER
+  hostT1: t1.{{ .Release.Namespace }}.dev.simpl-europe.eu
+  authorityHostT1:
+  csr:
+    cn: t2.{{ .Release.Namespace }}.dev.simpl-europe.eu
+    o: aruba-consumer
+    ou: aruba-consumer-dev
+    country: IT
+  keycloak:
+    internalHost: "{{ .Release.Namespace }}-keycloak.{{ .Release.Namespace }}.svc.cluster.local"
+    internalPort: 80
+    url: https://{{ tpl .Values.initParticipant.hostT1 . }}/auth
+    app:
+      realm: authority
+      clientId: cli
+      clientSecret:
+    master:
+      realm: master
+      user: admin
+      password: ''
+      clientId: admin-cli
+    authority:
+      user: user
+      password: ''
+      realm: authority
+  microservices:
+    usersRolesUrl: https://{{ tpl .Values.initParticipant.hostT1 . }}/cli/userApi/
+    authenticationProviderUrl: https://{{ tpl .Values.initParticipant.hostT1 . }}/cli/authApi/

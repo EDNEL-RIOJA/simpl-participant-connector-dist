@@ -1,0 +1,203 @@
+{{- if .Values.realmHardening.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-realm-hardening" (include "common.names.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ include "common.names.namespace" . | quote }}
+  labels: {{- include "common.labels.standard" ( dict "customLabels" .Values.commonLabels "context" $ ) | nindent 4 }}
+    app.kubernetes.io/component: realm-hardening
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: {{ .Values.realmHardening.backoffLimit | default 5 }}
+  ttlSecondsAfterFinished: {{ .Values.realmHardening.ttlSecondsAfterFinished | default 600 }}
+  template:
+    metadata:
+      labels: {{- include "common.labels.standard" ( dict "customLabels" .Values.commonLabels "context" $ ) | nindent 8 }}
+        app.kubernetes.io/component: realm-hardening
+      annotations:
+        vault.security.banzaicloud.io/vault-addr: {{ .Values.realmHardening.vault.addr | quote }}
+        {{- with .Values.realmHardening.vault.tlsSecret }}
+        # CA privada del endpoint de OpenBao (p. ej. secrets-<common>.example.invalid). Sin ella
+        # vault-env muere con "x509: certificate signed by unknown authority" y el hook falla.
+        vault.security.banzaicloud.io/vault-tls-secret: {{ . | quote }}
+        {{- end }}
+        vault.security.banzaicloud.io/vault-role: {{ .Values.realmHardening.vault.role | quote }}
+        vault.security.banzaicloud.io/vault-env-image: {{ .Values.realmHardening.vault.envImage | quote }}
+    spec:
+      restartPolicy: OnFailure
+      # vault-env needs a ServiceAccount token to authenticate to Vault. The
+      # vault-secrets-webhook rewrites the container so /vault/ becomes the
+      # only declared mount, which drops the kubelet-projected SA token. To
+      # keep the token available we use the keycloak SA (already bound to the
+      # Vault role) and mount the projected token explicitly below.
+      serviceAccountName: {{ include "keycloak.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      {{- include "keycloak.imagePullSecrets" . | nindent 6 }}
+      volumes:
+        - name: sa-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
+      containers:
+        - name: realm-hardening
+          image: {{ .Values.realmHardening.image | quote }}
+          imagePullPolicy: {{ .Values.realmHardening.imagePullPolicy | default "IfNotPresent" }}
+          volumeMounts:
+            - name: sa-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+          env:
+            - name: KC_URL
+              value: {{ .Values.realmHardening.keycloakUrl | quote }}
+            - name: KC_ADMIN_USER
+              value: {{ .Values.realmHardening.adminUser | quote }}
+            - name: KC_ADMIN_PASSWORD
+              value: {{ .Values.realmHardening.adminPassword | quote }}
+            - name: NON_MASTER_REALM
+              value: {{ .Values.realmHardening.realm | quote }}
+            - name: MASTER_FRONTEND_URL
+              value: {{ .Values.realmHardening.masterFrontendUrl | default "" | quote }}
+            - name: SSO_IDLE_TIMEOUT
+              value: {{ .Values.realmHardening.ssoIdleTimeoutSeconds | quote }}
+            - name: MASTER_PASSWORD_POLICY
+              value: {{ .Values.realmHardening.masterPasswordPolicy | quote }}
+            - name: NON_MASTER_PASSWORD_POLICY
+              value: {{ .Values.realmHardening.nonMasterPasswordPolicy | quote }}
+            - name: WAIT_RETRIES
+              value: {{ .Values.realmHardening.waitRetries | default 60 | quote }}
+            - name: WAIT_SLEEP_SECONDS
+              value: {{ .Values.realmHardening.waitSleepSeconds | default 5 | quote }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              KCADM=/opt/bitnami/keycloak/bin/kcadm.sh
+              # kcadm stores its config under ~/.keycloak/kcadm.config, but the
+              # JVM resolves `~` via `user.home` (read from /etc/passwd ->
+              # /home/keycloak), not from $HOME, and /home/keycloak is not
+              # writable by the runtime user. Force kcadm to a writable path
+              # by passing --config (must come after the command verb).
+              KCADM_CONFIG=/tmp/kcadm.config
+
+              echo "Waiting for Keycloak at ${KC_URL}/realms/master ..."
+              for i in $(seq 1 "${WAIT_RETRIES}"); do
+                if curl -sf "${KC_URL}/realms/master" -o /dev/null; then
+                  echo "Keycloak is up."
+                  break
+                fi
+                if [ "${i}" -eq "${WAIT_RETRIES}" ]; then
+                  echo "Timed out waiting for Keycloak." >&2
+                  exit 1
+                fi
+                sleep "${WAIT_SLEEP_SECONDS}"
+              done
+
+              echo "Authenticating to master realm as ${KC_ADMIN_USER}..."
+              "${KCADM}" config credentials --config "${KCADM_CONFIG}" \
+                --server "${KC_URL}" \
+                --realm master \
+                --user "${KC_ADMIN_USER}" \
+                --password "${KC_ADMIN_PASSWORD}"
+
+              harden_realm() {
+                local realm="$1"
+                local policy="$2"
+                # events=true: eventos del realm con retencion 2 años
+                # (eventsExpiration=63072000s) + admin events. Solo realm de participante.
+                local events="${3:-false}"
+
+                echo "[${realm}] passwordPolicy + ssoSessionIdleTimeout"
+                "${KCADM}" update "realms/${realm}" --config "${KCADM_CONFIG}" \
+                  -s "passwordPolicy=${policy}" \
+                  -s "ssoSessionIdleTimeout=${SSO_IDLE_TIMEOUT}"
+
+                echo "[${realm}] CONFIGURE_TOTP enabled + defaultAction"
+                "${KCADM}" update "authentication/required-actions/CONFIGURE_TOTP" --config "${KCADM_CONFIG}" \
+                  -r "${realm}" \
+                  -s 'enabled=true' \
+                  -s 'defaultAction=true'
+
+                # OTP OBLIGATORIO PARA TODOS (no solo condicional), solo en realms de
+                # negocio (no master, que lo usan los jobs init via password grant).
+                # Por defecto el browser flow trae "Browser - Conditional OTP" con una
+                # "Condition - user configured", asi que el OTP solo se pide si el
+                # usuario YA tiene uno -> al borrar/resetear el OTP el paso se salta y
+                # no se puede reconfigurar. Ponemos el subflow en REQUIRED y DESACTIVAMOS
+                # la condicion: el "OTP Form" (REQUIRED) se ejecuta siempre. Solo afecta
+                # al login interactivo (browser flow); el direct/password grant no.
+                if [ "${realm}" != "master" ]; then
+                  # El realm usa un browser flow CUSTOM (p.ej. "custom browser"), no el
+                  # "browser" por defecto -> resolver el flow vinculado (campo browserFlow)
+                  # y editar SU subflow OTP. La condicion gatea el OTP a quien ya lo tiene;
+                  # al deshabilitarla + subflow REQUIRED, el OTP Form (REQUIRED) corre
+                  # siempre y se fuerza a todos (tambien tras un reset).
+                  echo "[${realm}] forzando OTP obligatorio en el browser flow vinculado"
+                  bflow=$("${KCADM}" get "realms/${realm}" --config "${KCADM_CONFIG}" \
+                    --fields browserFlow --format csv --noquotes 2>/dev/null | tail -n1 | tr -d '"\r')
+                  [ -z "${bflow}" ] && bflow="browser"
+                  bflow_enc=$(printf '%s' "${bflow}" | sed 's/ /%20/g')
+                  echo "[${realm}] browser flow vinculado: '${bflow}'"
+                  otp_sub=$("${KCADM}" get "authentication/flows/${bflow_enc}/executions" --config "${KCADM_CONFIG}" -r "${realm}" \
+                    --fields id,displayName --format csv --noquotes 2>/dev/null | grep -i 'Conditional OTP' | head -n1 | cut -d, -f1 | tr -d '"\r') || true
+                  otp_cond=$("${KCADM}" get "authentication/flows/${bflow_enc}/executions" --config "${KCADM_CONFIG}" -r "${realm}" \
+                    --fields id,displayName --format csv --noquotes 2>/dev/null | grep -i 'Condition - user configured' | head -n1 | cut -d, -f1 | tr -d '"\r') || true
+                  if [ -n "${otp_sub}" ]; then
+                    # PUT .../executions sobrescribe la prioridad con la del body; si se
+                    # omite, Keycloak la pone a 0 y el subflow OTP queda ANTES del form
+                    # usuario/contraseña -> rompe el login (invalid_user_credentials sin
+                    # mostrar formulario). Fijamos una prioridad que deje el OTP DESPUES
+                    # del form (form+12 = 22 cuando el form esta en 10, tras attribute=21).
+                    form_prio=$("${KCADM}" get "authentication/flows/${bflow_enc}/executions" --config "${KCADM_CONFIG}" -r "${realm}" \
+                      --fields providerId,priority --format csv --noquotes 2>/dev/null \
+                      | awk -F, 'tolower($1) ~ /auth-username-password-form/ {print $2; exit}' | tr -d '"\r') || true
+                    [ -z "${form_prio}" ] && form_prio=10
+                    otp_prio=$(( form_prio + 12 ))
+                    "${KCADM}" update "authentication/flows/${bflow_enc}/executions" --config "${KCADM_CONFIG}" -r "${realm}" \
+                      -b "{\"id\":\"${otp_sub}\",\"requirement\":\"REQUIRED\",\"priority\":${otp_prio}}" || true
+                  else
+                    echo "[${realm}] WARN: subflow 'Conditional OTP' no encontrado en el flow '${bflow}'; revisar a mano"
+                  fi
+                  if [ -n "${otp_cond}" ]; then
+                    "${KCADM}" update "authentication/flows/${bflow_enc}/executions" --config "${KCADM_CONFIG}" -r "${realm}" \
+                      -b "{\"id\":\"${otp_cond}\",\"requirement\":\"DISABLED\"}" || true
+                  fi
+                fi
+
+                if [ "${events}" = "true" ]; then
+                  echo "[${realm}] eventos: login (retencion 2 años = 63072000s) + admin events"
+                  "${KCADM}" update "realms/${realm}" --config "${KCADM_CONFIG}" \
+                    -s 'eventsEnabled=true' \
+                    -s 'eventsExpiration=63072000' \
+                    -s 'adminEventsEnabled=true' \
+                    -s 'adminEventsDetailsEnabled=true'
+                fi
+              }
+
+              harden_realm "master" "${MASTER_PASSWORD_POLICY}"
+              harden_realm "${NON_MASTER_REALM}" "${NON_MASTER_PASSWORD_POLICY}" true
+
+              # frontendUrl del realm master. Va EL ULTIMO a proposito: cambia el issuer de
+              # los tokens de master, asi que el resto del job ya ha hecho sus llamadas
+              # cuando se aplica. Vacio -> no se toca nada.
+              if [ -n "${MASTER_FRONTEND_URL}" ]; then
+                echo "[master] frontendUrl -> ${MASTER_FRONTEND_URL}"
+                "${KCADM}" update "realms/master" --config "${KCADM_CONFIG}" \
+                  -s "attributes.frontendUrl=${MASTER_FRONTEND_URL}"
+              fi
+
+              echo "Realm hardening complete."
+{{- end }}

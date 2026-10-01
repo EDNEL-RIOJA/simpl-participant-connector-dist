@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Chart.Name }}-role-attributes
+data:
+  # Mapeo rol -> identity attributes de EDVAL (data-only). Se monta en /app/config/roleAttributes.json
+  # y se referencia con databaseSeeding.roleIdentityAttributesMapping.filePath. El seeding solo aplica
+  # sobre tabla vacia (despliegue desde 0). Ver app-values/Users-Roles/values.yaml.
+  roleAttributes.json: |
+{{ .Files.Get "files/roleAttributes.json" | indent 4 }}

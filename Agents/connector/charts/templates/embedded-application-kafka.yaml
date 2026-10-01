@@ -1,0 +1,125 @@
+{{- if .Values.embeddedCommon.enabled }}
+# Common embebido en el conector: Confluent Operator + Kafka (KRaft, SASL/PLAIN via OpenBao).
+# Portado de common_components/charts/templates/application.yaml (bloques confluent_operator + kafka).
+# sync-wave 3: después de openbao (1) y vswh (2) para que la inyección de secretos funcione.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: "{{ .Values.argocd.appname }}-kafka"
+  namespace: {{ .Values.argocd.namespace }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - ApplyOutOfSyncOnly=true
+      - CreateNamespace=true
+      - ServerSideApply=true
+  project: {{ .Values.project }}
+  destination:
+    server: {{ .Values.cluster.address }}
+    namespace: {{ .Values.cluster.namespace }}
+  sources:
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    ref: values
+  - repoURL: {{ .Values.confluent_operator.repo_URL }}
+    targetRevision: {{ .Values.confluent_operator.targetRevision }}
+    {{ if .Values.confluent_operator.chart }}
+    chart: {{ .Values.confluent_operator.chart }}
+    {{ else }}
+    path: {{ .Values.confluent_operator.path }}
+    {{ end }}
+    helm:
+      values: |
+        fullnameOverride: {{ .Values.confluent_operator.nameOverride }}
+        name: confluent-operator-{{ .Values.cluster.namespace }}
+        kRaftEnabled: true
+        imagePullSecretRef: github-registry-secret
+        {{- if .Values.nodeSelector }}
+        nodeSelector: {{- toYaml .Values.nodeSelector | nindent 10 }}
+        {{- end }}
+        image:
+          registry: {{ .Values.confluent_operator.image.registry }}
+          repository: {{ .Values.confluent_operator.image.application }}
+          tag: {{ .Values.confluent_operator.image.tag }}
+  - repoURL: "{{ .Values.kafka.repo_URL }}"
+    path: {{ .Values.kafka.path }}
+    targetRevision: {{ .Values.kafka.targetRevision }}
+    helm:
+      valueFiles:
+        {{- range .Values.kafka.valueFiles }}
+        - $values/Agents/connector/app-values/kafka/{{ . }}
+        {{- end }}
+      values: |
+        clusterIssuer: {{ .Values.cluster.issuer }}
+        hashicorp:
+          service: http://openbao-{{ .Values.cluster.namespace }}:8200
+          role: {{ .Values.secrets.secretEngine }}-role
+          secretConfigPath: "{{ .Values.secrets.secretEngine }}/{{ .Values.cluster.namespace }}-kafka-credentials"
+        kafka:
+          auth:
+            enabled: {{ .Values.kafka.auth.enabled }}
+            secretMethod: vault
+          image:
+            registry: {{ .Values.kafka.image.registry }}
+            application: {{ .Values.kafka.image.application }}
+            tag: {{ .Values.kafka.image.tag }}
+            initImage: {{ .Values.kafka.image.initImage }}
+            initTag: {{ .Values.kafka.image.initTag }}
+          imagePullSecrets:
+            - name: github-registry-secret
+          listeners:
+            internal:
+              advertisedHost: "kafka.{{ .Values.cluster.namespace }}.svc.cluster.local"
+            tls:
+              enabled: true
+              port: {{ .Values.kafka.listeners.tls.port | default 9094 }}
+              advertisedHost: "kafka-tls.{{ .Values.cluster.namespace }}.svc.cluster.local"
+              certManager:
+                enabled: true
+                issuerRef: {{ .Values.cluster.internalIssuer }}
+                issuerKind: "ClusterIssuer"
+                duration: "2160h"
+                renewBefore: "360h"
+          topic:
+            autocreate: {{ .Values.kafka.topic.autocreate }}
+          {{- if eq .Values.kafka.ha false }}
+          replicas: 1
+          topic:
+            replicas: 1
+          {{- end }}
+          {{- if .Values.nodeSelector }}
+          nodeSelector: {{- toYaml .Values.nodeSelector | nindent 12 }}
+          {{- end }}
+          {{- if .Values.kafka.resources.kafka }}
+          resources: {{- toYaml .Values.kafka.resources.kafka | nindent 12 }}
+          {{- end }}
+        kraftController:
+          image:
+            registry: {{ .Values.kafka.image.registry }}
+            application: {{ .Values.kafka.image.application }}
+            tag: {{ .Values.kafka.image.tag }}
+          imagePullSecrets:
+            - name: github-registry-secret
+          {{- if eq .Values.kafka.ha false }}
+          replicas: 1
+          {{- end }}
+          {{- if .Values.nodeSelector }}
+          nodeSelector: {{- toYaml .Values.nodeSelector | nindent 12 }}
+          {{- end }}
+          {{- if .Values.kafka.resources.kraftController }}
+          resources: {{- toYaml .Values.kafka.resources.kraftController | nindent 12 }}
+          {{- end }}
+{{- end }}

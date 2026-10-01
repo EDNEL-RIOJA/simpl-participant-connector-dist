@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ .Values.argocd.appname }}-openbao-seeder
+  namespace: {{ .Values.argocd.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  ignoreDifferences:
+  - kind: Secret
+    name: redis-secrets
+    namespace: {{ .Values.cluster.namespace }}
+    jsonPointers:
+      - /data
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - ApplyOutOfSyncOnly=true
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # Sin esto, el ignoreDifferences de arriba solo afecta al DIFF: ArgoCD deja de
+      # marcar el Secret como OutOfSync, pero al sincronizar sigue aplicando el
+      # manifiesto renderizado y pisando /data. Es decir, oculta el sintoma y deja
+      # viva la rotacion de la password de redis que describe el commit anterior.
+      - RespectIgnoreDifferences=true
+  project: {{ .Values.project }}
+  destination:
+    server: {{ .Values.cluster.address }}
+    namespace: {{ .Values.cluster.namespace }}
+  sources:
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: IAA/openbao-seeder
+    helm:
+      values: |
+        namespace: {{ .Values.cluster.namespace }}
+        commonNamespace: {{ .Values.cluster.commonToolsNamespace }}
+        secretEngine: {{ .Values.secrets.secretEngine }}
+        secretRole: {{ .Values.secrets.role }}

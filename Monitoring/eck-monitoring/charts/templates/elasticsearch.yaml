@@ -1,0 +1,318 @@
+{{- if eq .Values.namespaceTag .Values.mainNamespace }}
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: {{ .Release.Name }}-elasticsearch
+spec:
+  version: {{ .Values.elasticVersion }}
+  image: {{ .Values.elasticsearch.image }}:{{ default .Values.elasticVersion  .Values.elasticsearch.imageTag }}
+  monitoring:
+    logs:
+      elasticsearchRefs:
+        - name: {{ .Release.Name }}-elasticsearch
+    metrics:
+      elasticsearchRefs:
+        - name: {{ .Release.Name }}-elasticsearch
+  auth:
+    roles:
+    - secretName: logstash-writer-role-secret
+    - secretName: user-monitoring-role-secret
+    fileRealm:
+    - secretName: logstash-writer-secret
+    - secretName: user-monitoring-secret
+  nodeSets:
+  - name: {{ .Values.elasticsearch.name }}
+    {{- if eq .Values.deploy_minimal_stack true }}
+    count: {{ .Values.elasticsearch.minimal_stack_count }}
+    {{- else }}
+    count: {{ .Values.elasticsearch.count }}
+    {{- end }}
+    config: 
+      xpack.security.authc.token.enabled: true
+      http.cors.enabled : true
+      http.cors.allow-origin : "*"
+      http.cors.allow-methods : OPTIONS, HEAD, GET, POST, PUT, DELETE
+      http.cors.allow-headers: "kbn-version, Origin, X-Requested-With, Content-Type, Accept, Engaged-Auth-Token"
+      xpack.monitoring.collection.enabled: false
+    volumeClaimTemplates:
+      - metadata:
+          name: elasticsearch-data 
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+            {{- if eq .Values.deploy_minimal_stack true }}
+              storage: {{ .Values.elasticsearch.minimal_stack_diskSpace }}
+            {{- else }}
+              storage: {{ .Values.elasticsearch.diskSpace }}
+            {{- end }}
+          storageClassName: {{ .Values.elasticsearch.storageClassName }}
+    podTemplate:
+      metadata:
+        labels:
+          stack-namespace: {{ .Release.Namespace }} 
+      spec:
+        {{- if .Values.imagePullSecrets }}
+        imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 4 }}
+        {{- end }}
+        {{- with .Values.nodeSelector }}
+        nodeSelector:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        initContainers:
+        - name: sysctl
+          imagePullPolicy: Always
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              sysctl -w vm.max_map_count=2628576 &&
+              sysctl -w net.ipv4.tcp_retries2=5 &&
+              sysctl -w vm.swappiness=1 
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+            privileged: true
+        containers:
+        - name: elasticsearch
+          volumeMounts:
+          - name: certs
+            mountPath: /usr/share/elasticsearch/config/certs
+          imagePullPolicy: Always
+          securityContext:
+            runAsNonRoot: true
+          {{- if eq .Values.deploy_minimal_stack true }}
+          {{- with .Values.elasticsearch.minimal_stack_resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- else }}
+          {{- with .Values.elasticsearch.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- end }}
+          env:
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{  .Release.Name -}}-elasticsearch-es-elastic-user
+                  key: elastic
+          {{- with .Values.elasticsearch.env }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+        - name: filebeat
+          {{- with .Values.elasticsearch.resources_filebeat }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        - name: metricbeat
+          {{- with .Values.elasticsearch.resources_metricbeat }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        volumes:
+        - name: certs
+          secret:
+            secretName: {{ .Release.Name }}-elasticsearch-http-cert-secret-internal
+  http:
+    tls:
+      certificate:
+        secretName: {{ .Release.Name }}-elasticsearch-http-cert-secret-internal
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-elasticsearch-http
+  annotations:
+    k8s.apisix.apache.org/upstream-scheme: "https"
+    acme.cert-manager.io/http01-edit-in-place: "true"
+spec:
+  ingressClassName: apisix
+  tls:
+  - hosts:
+      -  {{ .Release.Name }}-elasticsearch-es-http.{{  .Release.Namespace   }}.svc
+    secretName: {{ .Release.Name }}-elasticsearch-http-cert-secret-internal
+  rules:
+    - host: {{ .Release.Name }}-elasticsearch-es-http.{{  .Release.Namespace   }}.svc
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name:  {{ .Release.Name }}-elasticsearch-es-http
+                port:
+                  number: 9200 
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-elasticsearch-http-public
+  annotations:
+    k8s.apisix.apache.org/upstream-scheme: "https"
+    cert-manager.io/cluster-issuer: {{ .Values.clusterIssuer }}
+spec:
+  ingressClassName: apisix
+  tls:
+  - hosts:
+    - {{ template "elasticsearch.dns" . }}
+    secretName: {{ .Release.Name }}-elasticsearch-ssl
+  rules:
+    - host: {{ template "elasticsearch.dns" . }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name:  {{ .Release.Name }}-elasticsearch-es-http
+                port:
+                  number: 9200
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: logstash-writer-secret
+  annotations:
+    # La password NO debe regenerarse: Logstash la lee UNA SOLA VEZ, al crear el pod (env desde un
+    # Secret no se refresca). Si cambia aqui, Logstash sigue con la vieja y Elasticsearch le
+    # responde 401 en bucle -- con el pod en Running, sin reinicios y sin escribir un solo indice.
+    # Paso el 12/08: logstash-single dejo de volcar transfer-records/contract-records durante dias.
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+type: kubernetes.io/basic-auth
+data:
+  username: {{ "logstash-writer" | b64enc }}
+  {{- /* `IsInstall` es falso en cada upgrade, asi que el valor dependia ENTERAMENTE del lookup; y
+         `index` sobre un lookup vacio revienta el render. Se usa el patron tolerante de
+         IAA/openbao-seeder/templates/redis-secrets.yaml: conserva el valor vivo si esta, y solo
+         genera uno nuevo cuando de verdad no existe. */}}
+  {{- $existingLogstash := lookup "v1" "Secret" .Release.Namespace "logstash-writer-secret" }}
+  password: {{ if and $existingLogstash (index $existingLogstash.data "password") }}{{ index $existingLogstash.data "password" }}{{ else }}{{ randAlphaNum 20 | b64enc }}{{ end }}
+  roles: {{ "logstash-writer-role" | b64enc }}
+---
+kind: Secret
+apiVersion: v1
+metadata:
+  name: logstash-writer-role-secret
+stringData:
+  roles.yml: |-
+    logstash-writer-role:
+      cluster: ["manage_index_templates", "monitor", "manage_ilm"]
+      indices:
+      - names: [ '*' ]
+        privileges:  ["read","write","create","create_index","manage","manage_ilm"]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: user-monitoring-secret
+  annotations:
+    # Mismo motivo que logstash-writer-secret: la password no debe regenerarse.
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+type: kubernetes.io/basic-auth
+data:
+  username: {{ "monitoring_user" | b64enc }}
+  {{- $existingMonitoring := lookup "v1" "Secret" .Release.Namespace "user-monitoring-secret" }}
+  password: {{ if and $existingMonitoring (index $existingMonitoring.data "password") }}{{ index $existingMonitoring.data "password" }}{{ else }}{{ randAlphaNum 20 | b64enc }}{{ end }}
+  roles: {{ "user-monitoring-role" | b64enc }}
+---
+kind: Secret
+apiVersion: v1
+metadata:
+  name: user-monitoring-role-secret
+stringData:
+  roles.yml: |-
+    user-monitoring-role:
+      cluster:
+          - monitor
+          - manage_index_templates
+          - manage_ingest_pipelines
+          - manage_ilm
+          - read_ilm
+          - manage
+          - cluster:admin/xpack/watcher/watch/put
+          - cluster:admin/xpack/watcher/watch/delete
+      indices:
+          - names:
+              - .monitoring-*
+            privileges:
+              - all
+          - names:
+              - .ds-*
+            privileges:
+              - all              
+          - names:
+              - metricbeat-*
+            privileges:
+              - manage
+              - read
+              - create_doc
+              - view_index_metadata
+              - create_index
+          - names:
+              - filebeat-*
+            privileges:
+              - manage
+              - read
+              - create_doc
+              - view_index_metadata
+              - create_index
+      applications: []
+---
+{{- if .Values.clusterIssuer_internal }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.clusterIssuer_internal }}-ca-{{ .Release.Namespace }}
+  #name: selfsigned-ca-{{  .Release.Namespace }}
+spec:
+  selfSigned: {}
+---
+{{- end}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: elk-ca-{{ .Release.Namespace }}
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: elk-ca
+  secretName: elk-ca-{{ .Release.Namespace }}
+  issuerRef:
+{{- if .Values.clusterIssuer_internal }}
+    name: {{ .Values.clusterIssuer_internal }}-ca-{{ .Release.Namespace }}
+{{- else }}
+    name: "dev-selfsigned"
+{{- end }}
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: elk-clusterissuer-{{ .Release.Namespace }}
+spec:
+  ca:
+    secretName: elk-ca-{{ .Release.Namespace }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: elasticsearch-certificate
+spec:
+  secretName: {{ .Release.Name }}-elasticsearch-http-cert-secret-internal
+  duration: {{ .Values.elasticsearch.cert.duration }}
+  renewBefore: {{ .Values.elasticsearch.cert.renewBefore }}
+  commonName: {{ .Release.Name }}-elasticsearch-es-http.{{  .Release.Namespace   }}.svc
+  dnsNames:
+    -  {{ .Release.Name }}-elasticsearch-es-http.{{  .Release.Namespace   }}
+    -  {{ .Release.Name }}-elasticsearch-es-http.{{  .Release.Namespace   }}.svc
+  issuerRef:
+    name: elk-clusterissuer-{{ .Release.Namespace }}
+    #name: {{ .Values.clusterIssuer_internal }}
+    kind: ClusterIssuer
+{{- end }}

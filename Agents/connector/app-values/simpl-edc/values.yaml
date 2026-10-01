@@ -1,0 +1,41 @@
+---
+contractmanager:
+  extension:
+    enabled: true
+  url: http://contract-dataprovider:8080/contract/v1
+  consumerUrl: http://contract-consumer:8080/contract/v1
+  providerUrl: http://contract-dataprovider:8080/contract/v1
+tls:
+  url:
+    authenticationprovider: http://authentication-provider:8080
+    participantIdSource: http://authentication-provider:8080/v1/credentials
+javadebug:
+  enabled: false
+  port: 5006
+serviceAccount:
+  name: simpl-edc-service-account
+ingress:
+  enabled: false
+extraEnvVars:
+- name: edc.transfer.proxy.token.signer.privatekey.alias
+  value: edc-transfer-key
+- name: edc.transfer.proxy.token.verifier.publickey.alias
+  value: edc-transfer-key-pub
+- name: edc.iam.publickeys.transfer-proxy.id
+  value: edc-transfer-key-pub
+- name: OTEL_SDK_DISABLED
+  value: 'true'
+- name: edc.iam.publickeys.transfer-proxy.value
+  valueFrom:
+    secretKeyRef:
+      name: edc-transfer-key
+      key: public
+- name: edc-transfer-key
+  valueFrom:
+    secretKeyRef:
+      name: edc-transfer-key
+      key: private
+caBundle:
+  enabled: false
+  certificates: {}
+nodeSelector: {}

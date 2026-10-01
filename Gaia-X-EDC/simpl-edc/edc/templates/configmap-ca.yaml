@@ -1,0 +1,19 @@
+{{- if .Values.caBundle.enabled }}
+# CA internas que el JVM debe tratar como ancla de confianza. Contenido PUBLICO (un certificado de
+# CA se distribuye precisamente para poder validar), por eso va en ConfigMap y no en Secret.
+#
+# Cada certificado en su propia clave: `keytool -importcert` solo lee el PRIMERO de un PEM con
+# varios, asi que un bundle concatenado importaria uno y descartaria el resto en silencio.
+# El initContainer build-truststore recorre todas las claves de este ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-ca-bundle
+  labels:
+    app: {{ .Values.deployment.label }}
+data:
+  {{- range $nombre, $pem := .Values.caBundle.certificates }}
+  {{ $nombre }}: |
+{{ $pem | trim | indent 4 }}
+  {{- end }}
+{{- end }}

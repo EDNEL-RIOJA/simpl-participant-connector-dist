@@ -1,0 +1,36 @@
+{{- if .Values.initAuthority.enabled  }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: init-authority-configmap
+  namespace: {{ .Release.Namespace }}
+data:
+  CSR_CN: "{{ tpl .Values.initAuthority.csr.cn . }}"
+  CSR_O: {{ tpl .Values.initAuthority.csr.o . | quote }}
+  CSR_OU: {{ tpl .Values.initAuthority.csr.ou . | quote }}
+  CSR_C: {{ .Values.initAuthority.csr.country | quote }}
+
+  AGENT_URL: "https://{{ tpl .Values.initAuthority.hostT1 . }}"
+
+  EJBCA_INTERNAL_HOST: {{ tpl .Values.initAuthority.ejbca.internalHost . | quote }}
+  EJBCA_INTERNAL_PORT: {{ .Values.initAuthority.ejbca.internalPort | quote }}
+
+  KEYCLOAK_INTERNAL_HOST: {{ tpl .Values.initAuthority.keycloak.internalHost . | quote }}
+  KEYCLOAK_INTERNAL_PORT: {{ .Values.initAuthority.keycloak.internalPort | quote }}
+  KEYCLOAK_URL: "{{ tpl .Values.initAuthority.keycloak.url . }}"
+  KEYCLOAK_APP_REALM: {{ .Values.initAuthority.keycloak.app.realm | quote }}
+  KEYCLOAK_APP_CLIENT_SECRET: {{ .Values.initAuthority.keycloak.app.clientSecret | quote }}
+  KEYCLOAK_APP_CLIENT_ID: {{ .Values.initAuthority.keycloak.app.clientId | quote }}
+  KEYCLOAK_MASTER_USER: {{  .Values.initAuthority.keycloak.master.user | quote }}
+  KEYCLOAK_MASTER_PASSWORD: {{ .Values.initAuthority.keycloak.master.password | quote }}
+
+  MICROSERVICE_USERS_ROLES_URL: {{ tpl .Values.initAuthority.microservices.usersRolesUrl . | quote }}
+  MICROSERVICE_SECURITY_ATTRIBUTES_PROVIDER_URL: {{ tpl .Values.initAuthority.microservices.securityAttributesProviderUrl . | quote }}
+  MICROSERVICE_IDENTITY_PROVIDER_URL: {{ tpl .Values.initAuthority.microservices.identityProviderUrl . | quote }}
+  MICROSERVICE_AUTHENTICATION_PROVIDER_URL: {{ tpl .Values.initAuthority.microservices.authenticationProviderUrl . | quote }}
+
+  MICROSERVICE_USERS_ROLES_INTERNAL_URL: "http://users-roles.{{ .Release.Namespace }}.svc.cluster.local:8080"
+  MICROSERVICE_SECURITY_ATTRIBUTES_PROVIDER_INTERNAL_URL: "http://security-attributes-provider.{{ .Release.Namespace }}.svc.cluster.local:8080"
+  MICROSERVICE_IDENTITY_PROVIDER_INTERNAL_URL: "http://identity-provider.{{ .Release.Namespace }}.svc.cluster.local:8080"
+  MICROSERVICE_AUTHENTICATION_PROVIDER_INTERNAL_URL: "http://authentication-provider.{{ .Release.Namespace }}.svc.cluster.local:8080"
+{{- end }}

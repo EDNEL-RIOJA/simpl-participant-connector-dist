@@ -1,0 +1,905 @@
+---
+imagePullSecrets:
+- name: github-registry-secret
+creimage:
+  repository: ghcr.io/cnie-es/eck-monitoring
+  pullPolicy: IfNotPresent
+  tag: 0.5.4
+elasticVersion: 9.4.1
+namespaceTag: test-namespace
+mainNamespace: common01
+agentType: common
+domainSuffix: dev.simpl-europe.eu
+clusterIssuer: dev-staging
+clusterIssuer_internal:
+deploy_minimal_stack: false
+loadSampleBusinessLogs: false
+elasticsearch:
+  image: ghcr.io/cnie-es/elasticsearch-elasticsearch
+  imageTag: ''
+  cert:
+    duration: 2160h0m0s
+    renewBefore: 360h0m0s
+  env: []
+  name: node
+  count: 3
+  minimal_stack_count: 1
+  diskSpace: 60Gi
+  minimal_stack_diskSpace: 10Gi
+  storageClassName: ''
+  resources:
+    requests:
+      memory: 100Mi
+      cpu: 100m
+    limits:
+      memory: 4Gi
+      cpu: 1500m
+  minimal_stack_resources:
+    requests:
+      memory: 100Mi
+      cpu: 100m
+    limits:
+      memory: 4Gi
+      cpu: 1
+  resources_metricbeat:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m
+  resources_filebeat:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m
+kibana:
+  count: 2
+  minimal_stack_count: 1
+  image: ghcr.io/cnie-es/kibana-kibana
+  dashboardsBranch: main
+  imageTag: ''
+  elasticsearchReleaseName: ''
+  cert:
+    duration: 2160h0m0s
+    renewBefore: 360h0m0s
+  config:
+    xpack.reporting.roles.enabled: false
+  resources:
+    requests:
+      memory: 100Mi
+      cpu: 100m
+    limits:
+      memory: 4Gi
+      cpu: 1
+  minimal_stack_resources:
+    requests:
+      memory: 100Mi
+      cpu: 100m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+  resources_metricbeat:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m
+  resources_filebeat:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m
+  env: []
+logstash:
+  ilm:
+    business:
+      hot:
+        max_age: 30d
+        max_primary_shard_size: 1gb
+      delete:
+        min_age: 365d
+    technical:
+      hot:
+        max_age: 30d
+        max_primary_shard_size: 1gb
+      delete:
+        min_age: 365d
+  minimal_stack_ilm:
+    business:
+      hot:
+        max_age: 3h
+        max_primary_shard_size: 100mb
+      delete:
+        min_age: 24h
+    technical:
+      hot:
+        max_age: 3h
+        max_primary_shard_size: 100mb
+      delete:
+        min_age: 24h
+  count_beats: 3
+  minimal_stack_count_beats: 1
+  count_syslog: 0
+  image: ghcr.io/cnie-es/logstash-logstash
+  diskSpace: 3Gi
+  minimal_stack_diskSpace: 1Gi
+  storageClassName: ''
+  imageTag: ''
+  env:
+  resources:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 4Gi
+      cpu: 500m
+  minimal_stack_resources:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 2Gi
+      cpu: 300m
+  resources_logstash_mon:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 2Gi
+      cpu: 500m
+  resources_filebeat:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m
+  resources_metricbeat:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m
+  resources_metricbeat_hpa:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m
+  cert:
+    duration: 2160h0m0s
+    renewBefore: 360h0m0s
+  pipelines_yml_config: "- pipeline.id: main\n  path.config: \"/app/elastic/logstash/config/pipelines/*.config\"
+    \ \n  pipeline.workers: 1\n  pipeline.batch.size: 125"
+  beats:
+    pipelines_group_name: beats
+    pipelines:
+    - name: beats-pipeline
+      input: |-
+        beats {
+          port => 5044
+          ssl_enabled => true
+          ssl_certificate_authorities => ["/usr/share/logstash/certs-logstash/ca.crt"]
+          ssl_certificate => "/usr/share/logstash/certs-logstash/tls.crt"
+          ssl_key => "/usr/share/logstash/certs-logstash/tls.key"
+          ssl_client_authentication => "required"
+        }
+        #file {
+        #  id => "my_plugin_id"
+        #  path => [ "/mnt/ilm/charts/log_samples/business/business.log"]
+        #  add_field => { "[kubernetes][container][name]" => "tier1-gateway" }
+        #}
+      filter: "filter {\n  ## removing ELK logs\n  if [kubernetes][container][name]
+        in [\"filebeat\", \"metricbeat\", \"logstash\", \"heartbeat\", \"kibana\",
+        \"elasticsearch\"] {\n    drop { }\n  }    \n  \n  # Technical logs \n  if
+        [kubernetes][container][name] in [\"sd-creation-wizard-api\", \"signer\",
+        \"sd-creation-wizard-api-validation\", \"edc-connector-adapter\"] {\n    json
+        {\n            source => \"message\"\n            skip_on_invalid_json =>
+        true\n            add_field => { \"log_type\" => \"technical\" }\n        }\n
+        \ }\n  # Business logs\n  if [kubernetes][container][name] in  [\"tier1-gateway\",
+        \"tier2-gateway\", \"contract-dataprovider\", \"contract-consumer\"] {\n    json
+        {\n      source => \"message\"\n      skip_on_invalid_json => true\n    }\n\n
+        \   if [level] == \"BUSINESS\" {\n      mutate { add_field => { \"log_type\"
+        => \"business\" } }\n      ruby {\n        code => '\n            if event.get(\"[message]\").is_a?(Hash)\n
+        \               event.set(\"is_json_message\", true)\n            else\n                event.set(\"is_json_message\",
+        false)\n            end\n          '\n        }\n      if [is_json_message]
+        {\n        if [message][msg] and [message][msg] != \"null\" { mutate { add_field
+        => { \"msg\" => \"%{[message][msg]}\" } } }\n        if [message][messageType]
+        and [message][messageType] != \"null\" { mutate { add_field => { \"messageType\"
+        => \"%{[message][messageType]}\" } } }\n        if [message][businessOperation]
+        and [message][businessOperation] != \"null\" { mutate { add_field => { \"businessOperation\"
+        => \"%{[message][businessOperation]}\" } } }\n        if [message][origin]
+        and [message][origin] != \"null\" { mutate { add_field => { \"origin\" =>
+        \"%{[message][origin]}\" } } }\n        if [message][httpStatus] and [message][httpStatus]
+        != \"null\" { mutate { add_field => { \"httpStatus\" => \"%{[message][httpStatus]}\"
+        } } }\n        if [message][destination] { mutate { add_field => { \"destination\"
+        => \"%{[message][destination]}\" } } }\n        if [message][correlationId]
+        and [message][correlationId] != \"null\" { mutate { add_field => { \"correlationId\"
+        => \"%{[message][correlationId]}\" } } }\n        if [message][user] and [message][user]
+        != \"null\" { mutate { add_field => { \"user\" => \"%{[message][user]}\" }
+        } }\n\n        ############ Added Logstash pipeline update Log Wraper 2.0
+        ############\n        if [message][userIp] and [message][userIp] != \"null\"
+        and [message][userIp] != \"None\" { mutate { add_field => { \"userIp\" =>
+        \"%{[message][userIp]}\" } } }\n        if [message][customFields] and [message][customFields]
+        != \"null\" {\n          mutate {\n            copy => { \"[message][customFields]\"
+        =>  \"customFields\" } \n          }\n        }\n        #######################################################################\n
+        \       mutate { remove_field => [ \"[message]\", \"[event][original]\" ]
+        }\n      }\n\n      #Code to handle sample logs\n      if (\"business_sample_log\"
+        in [tags]) {\n        ruby {\n          code => \"event.set('logstash_processed_at',
+        Time.now());\"\n        }\n        mutate {\n          convert => { \"logstash_processed_at\"
+        => \"string\" }\n        }\n      }\n      #######################\n    }\n
+        \   else {\n      mutate { add_field => { \"log_type\" => \"technical\" }
+        }\n    }\n  }\n  # Onboaring technical logs \n  if [kubernetes][container][name]
+        in [\"users-roles\", \"identity-provider\", \"onboarding\", \n                             \"security-attributes-provider\",
+        \"xsfc-advsearch-be\", \n                             \"contract-consumption-be-api\",
+        \"authentication-provider\", \n                             \"contract-consumer\",
+        \"contract-dataprovider\"] {  \n    json {\n            source => \"message\"\n
+        \           skip_on_invalid_json => true\n            add_field => { \"log_type\"
+        => \"technical\" }\n        }\n        \n    ruby {\n        code => '\n            if
+        event.get(\"[message]\").is_a?(Hash)\n                event.set(\"is_json_message\",
+        true)\n            else\n                event.set(\"is_json_message\", false)\n
+        \           end\n        '\n    }\n    if [is_json_message] {\n      if [message][httpStatus]
+        { mutate { add_field => { \"httpStatus\" => \"%{[message][httpStatus]}\" }
+        } }\n      if [message][msg] { mutate { add_field => { \"msg\" => \"%{[message][msg]}\"
+        } } }\n      if [message][httpRequestSize] { mutate { add_field => { \"httpRequestSize\"
+        => \"%{[message][httpRequestSize]}\" } } }\n      if [message][user] { mutate
+        { add_field => { \"user\" => \"%{[message][user]}\" } } }\n      if [message][httpExecutionTime]
+        { mutate { add_field => { \"httpExecutionTime\" => \"%{[message][httpExecutionTime]}\"
+        } } }\n      \n      mutate { remove_field => [ \"[message]\" ] }\n      \n
+        \   } \n  }\n  # Not JSON logs\n  if [kubernetes][container][name] == \"redis\"
+        {\n    grok {\n        match => { \n          \"message\" => [\n              '%{TIMESTAMP_ISO8601:ts}%{SPACE}%{WORD:stream}%{SPACE}%{WORD:redis_type}%{SPACE}%{NUMBER:process_id}:%{WORD:process_type}%{SPACE}%{MONTHDAY:day}%{SPACE}%{MONTH:month}%{SPACE}%{YEAR:year}%{SPACE}%{TIME:time}\\.%{INT:milliseconds}%{SPACE}\\*%{SPACE}%{GREEDYDATA:message}'\n
+        \           ]\n          }\n        overwrite => [ \"message\" ]\n        add_field
+        => {\n          \"timestamp\" => \"%{day} %{month} %{year} %{time}.%{milliseconds}\"\n
+        \         \"log_type\" => \"technical\"\n        }\n      }\n    date {\n
+        \         match => [ \"timestamp\", \"dd MMM yyyy HH:mm:ss.SSS\"]\n          target
+        => \"@timestamp\"\n        }\n    mutate {\n        remove_field => [\"timestamp\"]\n
+        \   } \n  }\n  if [kubernetes][container][name] == \"keycloak\" {\n    grok
+        {\n      match => { \n        \"message\" => [\n          '%{TIMESTAMP_ISO8601:ts}%{SPACE}%{WORD:level}%{SPACE}\\[%{JAVACLASS:logger}\\]%{SPACE}\\(%{DATA:thread}\\)%{SPACE}%{GREEDYDATA:message}'\n
+        \         ]\n      }\n      overwrite => [ \"message\" ]\n      add_field
+        => { \"log_type\" => \"technical\" }\n    }\n    mutate {\n      gsub => [\n
+        \       \"ts\", \",\", \".\"\n      ]\n    }\n    date {\n      match => [
+        \"ts\", \"yyyy-MM-dd HH:mm:ss,SSS\", \"yyyy-MM-dd HH:mm:ss.SSS\"]\n      target
+        => \"@timestamp\"\n\n    } \n  }\n  if [kubernetes][container][name] == \"postgres\"
+        {\n    grok {\n      match => { \n        \"message\" => [\n            '%{TIMESTAMP_ISO8601:ts}%{SPACE}%{WORD:timezone}%{SPACE}\\[%{NUMBER:pid}\\]%{SPACE}%{WORD:level}:%{SPACE}%{GREEDYDATA:message}'
+        \n          ]\n      }\n      overwrite => [ \"message\" ]\n      add_field
+        => { \"log_type\" => \"technical\" }\n    }\n    date {\n      match => [
+        \"ts\", \"yyyy-MM-dd HH:mm:ss.SSS\"]\n      target => \"@timestamp\"\n\n    }
+        \n  }\n  if [kubernetes][container][name] == \"simpl-edc-container\" {\n     mutate
+        {\n        gsub => [\"message\", \"\\x1B\\[[0-9;]*[mK]\", \"\"]\n      }\n
+        \   grok {\n      match => {\n        \"message\" => [\n           \"%{LOGLEVEL:level}
+        %{TIMESTAMP_ISO8601:timestamp} %{GREEDYDATA:message}\"\n        ]\n      }\n
+        \     overwrite => [ \"message\" ]\n      add_field => { \"log_type\" => \"technical\"
+        }\n    }\n    date {\n      match => [\"timestamp\", \"ISO8601\"]\n      target
+        => \"@timestamp\"\n    }\n  }\n  if [kubernetes][container][name] == \"kafka\"
+        {\n    grok {\n      match => {\n        \"message\" => [\n          \"^\\[%{LOGLEVEL:level}\\]\\s+%{TIMESTAMP_ISO8601:ls}\\s+\\[%{DATA:thread}\\]\\s+%{JAVACLASS:logger}\\s+%{GREEDYDATA:message}\"\n
+        \       ]\n      }\n      overwrite => [ \"message\" ]\n      add_field =>
+        { \"log_type\" => \"technical\" }\n    }\n    date {\n      match => [\"ts\",
+        \"ISO8601\"]\n      target => \"@timestamp\"\n    }\n  }\n  \n  if [kubernetes][container][name]
+        == \"signer\" {\n    date {\n      match => [ \"ts\", \"yyyy-MM-dd HH:mm:ss.SSS\",
+        \"ISO8601\", \"yyyy-MM-dd HH:mm:ss\", \"dd MMM yyyy HH:mm:ss.SSS\", \"yyyy-MM-dd
+        HH:mm:ss,SSS\"]\n      target => \"@timestamp\"\n    } \n  }\n  #else {\n
+        \ #  date {\n  #    match => [ \"timestamp\", \"yyyy-MM-dd HH:mm:ss.SSS\",
+        \"ISO8601\", \"yyyy-MM-dd HH:mm:ss\", \"dd MMM yyyy HH:mm:ss.SSS\", \"yyyy-MM-dd
+        HH:mm:ss,SSS\" ]\n  #    target => \"@timestamp\"\n  #  }\n  #}\n\n  # Keep
+        only specified fields\n  mutate {\n    remove_field => [\n      \"agent\",\n
+        \     \"input\",\n      \"is_json_message\",\n      \"host\",           \n
+        \     \"log\",\n      \"container.id\",\n      \"container.runtime\",\n      \"timestamp\",\n
+        \     \"stream\",\n      \"[kubernetes][replicaset]\",\n      \"[kubernetes][labels]\",\n
+        \     \"[kubernetes][namespace_uid]\",\n      \"[kubernetes][pod][uid]\",\n
+        \     \"[kubernetes][pod][ip]\",\n      \"[kubernetes][namespace_labels]\",\n
+        \     \"[kubernetes][node]\"\n    ]\n  }\n\n  #Code to handle sample logs\n
+        \ if (\"business_sample_log\" in [tags]) {\n    date {\n      match => [ \"logstash_processed_at\",
+        \"ISO8601\" ]\n      target => \"@timestamp\"\n    }\n  }\n  ###########################\n}"
+      output: "output {\n  if [log_type] == \"business\" {\n    elasticsearch {\n
+        \     hosts => [ \"${ELASTIC_ELASTICSEARCH_ES_HOSTS}\" ]\n      user => \"${LOGSTASH_USER}\"\n
+        \     password => \"${LOGSTASH_PASSWORD}\"\n      ssl_enabled => \"true\"\n
+        \     ssl_verification_mode => \"full\"\n      ssl_certificate_authorities
+        => \"/usr/share/logstash/config/certs/ca.crt\"\n      index => \"business-logs-%{[kubernetes][namespace]}\"\n
+        \     template_name => \"business-template\"\n      action => \"create\"\n
+        \   }\n  }\n  else if [log_type] == \"technical\" {\n    elasticsearch {\n
+        \     hosts => [ \"${ELASTIC_ELASTICSEARCH_ES_HOSTS}\" ]\n      user => \"${LOGSTASH_USER}\"\n
+        \     password => \"${LOGSTASH_PASSWORD}\"\n      ssl_enabled => \"true\"\n
+        \     ssl_verification_mode => \"full\"\n      ssl_certificate_authorities
+        => \"/usr/share/logstash/config/certs/ca.crt\"\n      index => \"technical-logs-%{[kubernetes][namespace]}\"\n
+        \     template_name => \"technical-template\"\n      action => \"create\"\n
+        \   }\n  }\n  #stdout { \n  #  codec => json\n  #}\n}"
+  syslog:
+    pipelines_group_name: syslog
+    pipelines:
+    - name: syslog-pipeline
+      input: |-
+        input {
+          syslog {
+            port => 514
+          }
+        }
+      filter: |-
+        filter {
+        }
+      output: "output {\n  elasticsearch {\n    hosts => [ \"${ELASTIC_ELASTICSEARCH_ES_HOSTS}\"
+        ]\n    index => \"%{[@metadata][beat]}-%{[@metadata][version]}\"\n    user
+        => \"${LOGSTASH_USER}\"\n    password => \"${LOGSTASH_PASSWORD}\"\n    ssl_enabled
+        => \"true\"\n    ssl_verification_mode => \"full\"\n    ssl_certificate_authorities
+        => \"${ELASTIC_ELASTICSEARCH_ES_SSL_CERTIFICATE_AUTHORITY}\"\n  }\n  #stdout
+        { \n  #  codec => rubydebug\n  #}\n}"
+  mon:
+    kafka:
+      security_protocol: PLAINTEXT
+    pipelines:
+    - name: alerts-pipeline
+      pipelines_group_name: alerts
+      topic_id: notifications
+      email_receiver: test@atos.net
+      input: "input {\n  elasticsearch {\n    hosts => [ \"${ELASTIC_ELASTICSEARCH_ES_HOSTS}\"
+        ]\n    user => \"${LOGSTASH_USER}\"\n    password => \"${LOGSTASH_PASSWORD}\"\n
+        \   ssl_enabled => \"true\"\n    ssl_verification_mode => \"full\"\n    ssl_certificate_authorities
+        => \"/usr/share/logstash/config/certs/ca.crt\"\n    index => \"alerts-resources\"\n
+        \   query => '{ \"query\": { \"range\": { \"@timestamp\": { \"gte\": \"now-15m\"
+        } } } }'\n    schedule => \"*/15 * * * *\"             \n  }\n}"
+      filter: |-
+        filter {
+          if [ruleName] in ["JVM Memory Pressure Rule", "Node Availability Rule", "Unassigned Shards Rule", "CPU Usage Rule"] {
+            ruby {
+              code => '
+                require "json"
+                # Helper function to replace JSON object with its "value" field
+                def replace_host_json(text)
+                  return text unless text
+                  text.gsub(/(\{.*?"field".*?"value".*?\})/) do |match|
+                    begin
+                      obj = JSON.parse(match)
+                      obj["value"] || match
+                    rescue JSON::ParserError
+                      match
+                    end
+                  end
+                end
+                subject = event.get("subject")
+                if subject
+                  new_subject = replace_host_json(subject)
+                  event.set("subject", new_subject)
+                end
+                message = event.get("message")
+                if message
+                  new_message = replace_host_json(message)
+                  event.set("message", new_message)
+                end
+              '
+            }
+          }
+          if [ruleName] == "Indexing Rate Drop Rule" {
+              grok {
+                match => { "subject" => "\- %{NUMBER:index_rate:float} events/s" }
+              }
+              ruby {
+                code => "
+                  if event.get('index_rate')
+                    rounded = event.get('index_rate').to_i
+                    subject = event.get('subject').gsub(/- \d+(\.\d+)? events\/s/, '- ' + rounded.to_s + ' events/s')
+                    event.set('subject', subject)
+                  end
+                "
+              }
+              grok {
+                match => { "message" => "Indexing Rate: %{NUMBER:msg_rate:float} events/s" }
+              }
+              ruby {
+                code => "
+                  if event.get('msg_rate')
+                    rounded_msg = event.get('msg_rate').to_i
+                    message = event.get('message').gsub(/Indexing Rate: \d+(\.\d+)? events\/s/, 'Indexing Rate: ' + rounded_msg.to_s + ' events/s')
+                    event.set('message', message)
+                  end
+                "
+              }
+          }
+          else if [ruleName] == "CPU Usage Rule" {
+              grok {
+                match => { "subject" => ".*? - %{NUMBER:cpu_rate:float}%" }
+              }
+              ruby {
+                code => "
+                  if event.get('cpu_rate')
+                    rounded = event.get('cpu_rate').to_i
+                    subject = event.get('subject').gsub(/- \d+(\.\d+)?%/, '- ' + rounded.to_s + '%')
+                    event.set('subject', subject)
+                  end
+                "
+              }
+              grok {
+                match => { "message" => ".*?CPU Usage: %{NUMBER:msg_cpu_rate:float}%" }
+              }
+              ruby {
+                code => "
+                  if event.get('msg_cpu_rate')
+                    rounded_msg = event.get('msg_cpu_rate').to_i
+                    message = event.get('message').gsub(/CPU Usage: \d+(\.\d+)?%/, 'CPU Usage: ' + rounded_msg.to_s + '%')
+                    event.set('message', message)
+                  end
+                "
+              }
+          }
+          else if [ruleName] == "Search Rate Drop Rule" {
+              grok {
+                match => { "subject" => ".*? - %{NUMBER:search_rate:float}" }
+              }
+              ruby {
+                code => "
+                  if event.get('search_rate')
+                    rounded = event.get('search_rate').to_i
+                    subject = event.get('subject').gsub(/- \d+(\.\d+)?%/, '- ' + rounded.to_s + '%')
+                    event.set('subject', subject)
+                  end
+                "
+              }
+              grok {
+                match => { "message" => ".*?Search Rate: %{NUMBER:msg_search_rate:float}" }
+              }
+              ruby {
+                code => "
+                  if event.get('msg_search_rate')
+                    rounded_msg = event.get('msg_search_rate').to_i
+                    message = event.get('message').gsub(/Search Rate: \d+(\.\d+)?/, 'Search Rate: ' + rounded_msg.to_s)
+                    event.set('message', message)
+                  end
+                "
+              }
+          }
+          mutate {
+            add_field => { "channel" => "email" }
+            add_field => { "to" => "${LOGSTASH_ALERTS_EMAIL_RECEIVER}" }
+            remove_field => [ "@timestamp", "ruleName" ]
+          }
+        }
+      output: |-
+        output {
+          kafka {
+            bootstrap_servers => "${LOGSTASH_KAFKA_BOOTSTRAP_SERVERS}"
+            security_protocol => "${LOGSTASH_KAFKA_SECURITY_PROTOCOL}"
+            topic_id => "${LOGSTASH_ALERTS_KAFKA_TOPIC_ID}"
+            codec => json
+          }
+        }
+    - name: infrastructure-pipeline
+      pipelines_group_name: infrastructure
+      topic_id: simpl-infra-consumption-data
+      input: "input {\n  kafka {\n    bootstrap_servers => \"${LOGSTASH_KAFKA_BOOTSTRAP_SERVERS}\"\n
+        \   security_protocol => \"${LOGSTASH_KAFKA_SECURITY_PROTOCOL}\"\n    topics
+        => [\"${LOGSTASH_INFRASTRUCTURE_KAFKA_TOPIC_ID}\"]\n    codec => json\n    add_field
+        => { \"log_type\" => \"infrastructure\" }\n  }\n} "
+      filter: "filter {\n  mutate {\n    gsub => [\n      \"[metadata][timestamp]\",
+        \"[\\u202F\\u00A0]\", \" \",\n      \"[lastUpdate]\", \"[\\u202F\\u00A0]\",
+        \" \",\n      \"[period][from]\", \"[\\u202F\\u00A0]\", \" \",\n      \"[period][to]\",
+        \"[\\u202F\\u00A0]\", \" \"\n    ]\n  }\n  date {\n      match => [ \"[metadata][timestamp]\",
+        \"MMM d, yyyy, h:mm:ss a\", \"MMM dd, yyyy, h:mm:ss a\" ]\n      target =>
+        \"@timestamp\"\n      timezone => \"UTC\"\n  }          \n  date {\n    match
+        => [ \"lastUpdate\", \"MMM d, yyyy, h:mm:ss a\", \"MMM dd, yyyy, h:mm:ss a\"
+        ]\n    target => \"lastUpdate\"\n    timezone => \"UTC\"\n  }\n  date {\n
+        \   match => [ \"[period][from]\", \"MMM d, yyyy, h:mm:ss a\", \"MMM dd, yyyy,
+        h:mm:ss a\" ]\n    target => \"[period][from]\"\n    timezone => \"UTC\"\n
+        \ }\n  date {\n    match => [ \"[period][to]\", \"MMM d, yyyy, h:mm:ss a\",
+        \"MMM dd, yyyy, h:mm:ss a\" ]\n    target => \"[period][to]\"\n    timezone
+        => \"UTC\"\n  }\n\n  if [metadata][additionalInfo] == \"Hourly Usage Volume\"
+        {\n    split {\n      field => \"[hourlyUsage][volume]\"\n    }  \n    split
+        {\n      field => \"[hourlyUsage][volume][details]\"\n    }\n  }\n  else if
+        [metadata][additionalInfo] == \"Monthly Usage Volume\" {\n    split {\n      field
+        => \"[monthlyUsage][volume]\"\n    }  \n    split {\n      field => \"[monthlyUsage][volume][details]\"\n
+        \   }  \n  }\n  else if [metadata][additionalInfo] == \"Hourly Usage Instance\"
+        {\n    split {\n      field => \"[hourlyUsage][instance]\"\n    }\n    split
+        {\n      field => \"[hourlyUsage][instance][details]\"\n    }\n  }\n  else
+        if [metadata][additionalInfo] == \"Monthly Usage Instance\" {\n    split {\n
+        \     field => \"[monthlyUsage][instance]\"\n    }\n    split {\n      field
+        => \"[monthlyUsage][instance][details]\"\n    }\n  }\n  else if [metadata][additionalInfo]
+        == \"Hourly Usage Snapshot\" {\n    split {\n      field => \"[hourlyUsage][snapshot]\"\n
+        \   }\n  }\n  else if [metadata][additionalInfo] == \"Monthly Usage Snapshot\"
+        {\n    split {\n      field => \"[monthlyUsage][snapshot]\"\n    }\n  }\n
+        \ else if [metadata][additionalInfo] == \"Hourly Usage Storage\" {\n    split
+        {\n      field => \"[hourlyUsage][storage]\"\n    }\n  }\n  else if [metadata][additionalInfo]
+        == \"Monthly Usage Storage\" {\n    split {\n      field => \"[monthlyUsage][storage]\"\n
+        \   }\n  }\n  if [metadata][additionalInfo] == \"Monthly Usage Savings Plan\"
+        {\n    split {\n      field => \"[monthlyUsage][savingsPlan]\"\n    }\n    split
+        {\n      field => \"[monthlyUsage][savingsPlan][details]\"\n    }\n  }\n  if
+        [metadata][additionalInfo] == \"Resources Usage\" { \n    split {\n      field
+        => \"[resourcesUsage]\"\n    }\n    split {\n      field => \"[resourcesUsage][resources]\"\n
+        \   }\n    split {\n      field => \"[resourcesUsage][resources][components]\"\n
+        \   }\n  }     \n}"
+      output: "output {\n  if [log_type] == \"infrastructure\" {\n  elasticsearch
+        {\n    hosts => [ \"${ELASTIC_ELASTICSEARCH_ES_HOSTS}\" ]\n    user => \"${LOGSTASH_USER}\"\n
+        \   password => \"${LOGSTASH_PASSWORD}\"\n    ssl_enabled => \"true\"\n    ssl_verification_mode
+        => \"full\"\n    ssl_certificate_authorities => \"/usr/share/logstash/config/certs/ca.crt\"\n
+        \   index => \"infrastructure-reports\"\n    action => \"create\"            \n
+        \   }\n  }\n}"
+    - name: metricbeat-hpa-pipeline
+      pipelines_group_name: hpa
+      input: |-
+        input {
+          beats {
+            port => 5044
+            ssl_enabled => true
+            ssl_certificate_authorities => ["/usr/share/logstash/certs-logstash/ca.crt"]
+            ssl_certificate => "/usr/share/logstash/certs-logstash/tls.crt"
+            ssl_key => "/usr/share/logstash/certs-logstash/tls.key"
+            ssl_client_authentication => "required"
+            add_field => { "log_type" => "metricbeat-hpa" }
+          }
+        }
+      filter: |-
+        filter {
+          if [http][kubernetes_hpa][items] {
+            split {
+              field => "[http][kubernetes_hpa][items]"
+            }
+            mutate {
+              rename => {
+                "[http][kubernetes_hpa][items]" => "[hpa_item]"
+              }
+            }
+            if [hpa_item][status][conditions] {
+              split {
+                field => "[hpa_item][status][conditions]"
+              }
+            }
+          }
+        }
+      output: |-
+        output {
+          if [log_type] == "metricbeat-hpa" {
+            elasticsearch {
+              hosts => [ "${ELASTIC_ELASTICSEARCH_ES_HOSTS}" ]
+              user => "${LOGSTASH_USER}"
+              password => "${LOGSTASH_PASSWORD}"
+              ssl_enabled => "true"
+              ssl_verification_mode => "full"
+              ssl_certificate_authorities => "/usr/share/logstash/config/certs/ca.crt"
+              index => "metricbeat-hpa-reports"
+              template_name => "metricbeat-hpa-template"
+              action => "create"
+            }
+          }
+        }
+    - name: transfer-records-pipeline
+      pipelines_group_name: transfer-records
+      topic_id: contract_consumption.transfer_record
+      input: |-
+        input {
+          kafka {
+            bootstrap_servers => "${LOGSTASH_KAFKA_BOOTSTRAP_SERVERS}"
+            security_protocol => "${LOGSTASH_KAFKA_SECURITY_PROTOCOL}"
+            topics_pattern => "(.*\.)?contract_consumption\.transfer_record(-.*)?"
+            codec => json
+            group_id => "logstash-transfer-records-v2"
+            auto_offset_reset => "earliest"
+          }
+        }
+      filter: |-
+        filter {
+          # All .config files are merged into a single Logstash pipeline (pipeline.id: main
+          # globbing *.config), so every event flows through every filter/output. Guard on the
+          # transfer record's identifying field so this block only touches genuine transfer
+          # records and never tags/reshapes other events.
+          if [transferProcessId] {
+            # Use the transfer state timestamp as the event time (falls back to createdAt)
+            if [stateTimestamp] {
+              date {
+                match => [ "stateTimestamp", "UNIX_MS", "ISO8601" ]
+                target => "@timestamp"
+              }
+            } else if [createdAt] {
+              date {
+                match => [ "createdAt", "UNIX_MS", "ISO8601" ]
+                target => "@timestamp"
+              }
+            }
+
+            # Add log type for indexing (enriched transfer records consumed by the Clearing House)
+            mutate {
+              add_field => { "log_type" => "transfer-record" }
+              add_field => { "source" => "kafka-edc-transfer" }
+            }
+
+            # Remove unnecessary fields if present
+            mutate {
+              remove_field => [ "[@metadata][kafka]" ]
+            }
+          }
+        }
+      output: |-
+        output {
+          # Merged pipeline: route only transfer records to the transfer index (see filter note above).
+          if [transferProcessId] {
+            elasticsearch {
+              hosts => [ "${ELASTIC_ELASTICSEARCH_ES_HOSTS}" ]
+              user => "${LOGSTASH_USER}"
+              password => "${LOGSTASH_PASSWORD}"
+              ssl_enabled => "true"
+              ssl_verification_mode => "full"
+              ssl_certificate_authorities => "/usr/share/logstash/config/certs/ca.crt"
+              index => "transfer-records-%{+YYYY.MM.dd}"
+              action => "create"
+            }
+          }
+        }
+    - name: contract-records-pipeline
+      pipelines_group_name: contract-records
+      topic_id: contract_consumption.contract_record
+      input: |-
+        input {
+          kafka {
+            bootstrap_servers => "${LOGSTASH_KAFKA_BOOTSTRAP_SERVERS}"
+            security_protocol => "${LOGSTASH_KAFKA_SECURITY_PROTOCOL}"
+            topics_pattern => "(.*\.)?contract_consumption\.contract_record(-.*)?"
+            codec => json
+            group_id => "logstash-contract-records-v2"
+            auto_offset_reset => "earliest"
+          }
+        }
+      filter: |-
+        filter {
+          # All .config files are merged into a single Logstash pipeline (pipeline.id: main
+          # globbing *.config), so every event flows through every filter/output. Guard on the
+          # contract record's identifying field so this block only touches genuine contract
+          # records and never tags/reshapes other events.
+          if [contractNegotiationId] {
+            # Use the negotiation state timestamp as the event time (falls back to createdAt)
+            if [stateTimestamp] {
+              date {
+                match => [ "stateTimestamp", "UNIX_MS", "ISO8601" ]
+                target => "@timestamp"
+              }
+            } else if [createdAt] {
+              date {
+                match => [ "createdAt", "UNIX_MS", "ISO8601" ]
+                target => "@timestamp"
+              }
+            }
+
+            # Add log type for indexing (enriched contract records consumed by the Clearing House)
+            mutate {
+              add_field => { "log_type" => "contract-record" }
+              add_field => { "source" => "kafka-edc-contract" }
+            }
+
+            # Remove unnecessary fields if present
+            mutate {
+              remove_field => [ "[@metadata][kafka]" ]
+            }
+          }
+        }
+      output: |-
+        output {
+          # Merged pipeline: route only contract records to the contract index (see filter note above).
+          if [contractNegotiationId] {
+            elasticsearch {
+              hosts => [ "${ELASTIC_ELASTICSEARCH_ES_HOSTS}" ]
+              user => "${LOGSTASH_USER}"
+              password => "${LOGSTASH_PASSWORD}"
+              ssl_enabled => "true"
+              ssl_verification_mode => "full"
+              ssl_certificate_authorities => "/usr/share/logstash/config/certs/ca.crt"
+              index => "contract-records-%{+YYYY.MM.dd}"
+              action => "create"
+            }
+          }
+        }
+daemonset:
+  priorityClass:
+    enabled: true
+    name: monitoring-daemonset-priority
+    value: 1000000
+nodeSelector: {}
+filebeat:
+  image: ghcr.io/cnie-es/beats-filebeat
+  imageTag: ''
+  resources:
+    requests:
+      memory: 100Mi
+      cpu: 10m
+    limits:
+      memory: 1Gi
+      cpu: 100m
+  ilm:
+    hot:
+      max_age: 7d
+      max_primary_shard_size: 1gb
+    delete:
+      min_age: 14d
+  minimal_stack_ilm:
+    hot:
+      max_age: 3h
+      max_primary_shard_size: 100mb
+    delete:
+      min_age: 24h
+  cert:
+    duration: 2160h0m0s
+    renewBefore: 360h0m0s
+  input: "filebeat.autodiscover:\n  providers:\n    - type: kubernetes\n      # Filter
+    logs only from the monitored namespace\n      namespace: \"${MONITORED_NAMESPACE}\"\n
+    \     templates:\n        # Condition for redis container in the monitored namespace\n
+    \       - condition.equals.kubernetes.container.name: \"redis\"\n          config:\n
+    \           - type: filestream\n              id: redis-logs-${data.kubernetes.container.id}\n
+    \             paths:\n                - /var/log/containers/*${data.kubernetes.container.id}.log\n
+    \             parsers:\n                - container:\n                    stream:
+    stdout\n                - multiline:\n                    type: pattern\n                    pattern:
+    '^\\d+:\\w+\\s+\\d{2}\\s+\\w{3}\\s+\\d{4}'\n                    negate: true\n
+    \                   match: after\n              prospector:\n                scanner:\n
+    \                 fingerprint.enabled: true\n                  symlinks: true\n
+    \             file_identity.fingerprint: ~\n        # Condition for json structured
+    logs\n        - condition:\n            or:\n              # Business logs\n              -
+    equals:\n                  kubernetes.container.name: \"tier1-gateway\"\n              -
+    equals:\n                  kubernetes.container.name: \"tier2-gateway\"\n              #
+    Onboarding technical logs containers\n              - equals:\n                  kubernetes.container.name:
+    \"identity-provider\"\n              - equals:\n                  kubernetes.container.name:
+    \"onboarding\"\n              - equals:\n                  kubernetes.container.name:
+    \"security-attributes-provider\"\n              - equals:\n                  kubernetes.container.name:
+    \"users-roles\"\n              - equals:\n                  kubernetes.container.name:
+    \"edc-connector-adapter\"\n              # Logs not specified yet\n              -
+    equals:\n                  kubernetes.container.name: \"signer\"\n              -
+    equals:\n                  kubernetes.container.name: \"sd-creation-wizard-api\"\n
+    \             - equals:\n                  kubernetes.container.name: \"sd-creation-wizard-api-validation\"\n
+    \             - equals: \n                  kubernetes.container.name: \"xsfc-advsearch-be\"\n
+    \             - equals:\n                  kubernetes.container.name: \"contract-consumption-be-api\"\n
+    \             - equals:\n                  kubernetes.container.name: \"authentication-provider\"\n
+    \             - equals:\n                  kubernetes.container.name: \"contract-consumer\"\n
+    \             - equals:\n                  kubernetes.container.name: \"contract-dataprovider\"\n
+    \         config:\n            - type: filestream\n              id: json-structured-logs-${data.kubernetes.container.id}\n
+    \             paths:\n                - /var/log/containers/*${data.kubernetes.container.id}.log\n
+    \             parsers:\n                - container:\n                    stream:
+    all\n              prospector:\n                scanner:\n                  fingerprint.enabled:
+    true\n                  fingerprint.length: 512\n                  fingerprint.offset:
+    0\n                  symlinks: true\n              file_identity.fingerprint:
+    ~\n        - condition:\n            or:\n              # External apps logs\n
+    \             - equals:\n                  kubernetes.container.name: \"keycloak\"\n
+    \             - equals:\n                  kubernetes.container.name: \"postgres\"\n
+    \         config:\n            - type: filestream\n              id: external-apps-logs-${data.kubernetes.container.id}\n
+    \             paths:\n                - /var/log/containers/*${data.kubernetes.container.id}.log\n
+    \             parsers:\n                - container:\n                    stream:
+    stdout\n                - multiline:\n                    type: pattern\n                    pattern:
+    '^[0-9]{4}-[0-9]{2}-[0-9]{2}'\n                    negate: true\n                    match:
+    after\n              prospector:\n                scanner:\n                  fingerprint.enabled:
+    true\n                  symlinks: true\n              file_identity.fingerprint:
+    ~\n        # EDC container logs\n        - condition.equals.kubernetes.container.name:
+    \"simpl-edc-container\"\n          config:\n            - type: filestream\n              id:
+    edc-logs-${data.kubernetes.container.id}\n              paths:\n                -
+    /var/log/containers/*${data.kubernetes.container.id}.log\n              parsers:\n
+    \               - container:\n                    stream: stdout\n                -
+    multiline:\n                    type: pattern\n                    pattern: '^\\x1B\\[[0-9;]*[mK]*(DEBUG|INFO|WARNING|ERROR|SEVERE)'\n
+    \                   negate: true\n                    match: after\n              prospector:\n
+    \               scanner:\n                  fingerprint.enabled: true\n                  symlinks:
+    true\n              file_identity.fingerprint: ~\n        - condition.equals.kubernetes.container.name:
+    \"kafka\"\n          config:\n            - type: filestream\n              id:
+    kafka-logs-${data.kubernetes.container.id}\n              paths:\n                -
+    /var/log/containers/*${data.kubernetes.container.id}.log\n              parsers:\n
+    \               - container:\n                    stream: stdout\n                -
+    multiline:\n                    type: pattern\n                    pattern: '^\\[[A-Z]+\\]\\s+[0-9]{4}-[0-9]{2}-[0-9]{2}'\n
+    \                   negate: true\n                    match: after\n              prospector:\n
+    \               scanner:\n                  fingerprint.enabled: true\n                  symlinks:
+    true\n              file_identity.fingerprint: ~\n"
+  output: "output.logstash:\n  hosts: [\"${LOGSTASH_HOSTS}\"]\n  ssl.enabled: true\n
+    \ ssl.certificate_authorities: [\"/usr/share/filebeat/certs/ca.crt\"]\n  ssl.verification_mode:
+    full\n  ssl.certificate: \"/usr/share/filebeat/certs/tls.crt\"\n  ssl.key: \"/usr/share/filebeat/certs/tls.key\"\n#output.console:\n#
+    \ pretty: true  \n"
+metricbeat:
+  image: ghcr.io/cnie-es/beats-metricbeat
+  imageTag: ''
+  ilm:
+    hot:
+      max_age: 7d
+      max_primary_shard_size: 1gb
+    delete:
+      min_age: 1d
+  minimal_stack_ilm:
+    hot:
+      max_age: 3h
+      max_primary_shard_size: 100mb
+    delete:
+      min_age: 6h
+  resources:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m
+  kubeStateHost: kube-state-metrics.kube-state-metrics.svc.cluster.local:8080
+heartbeat:
+  image: ghcr.io/cnie-es/beats-heartbeat
+  ilm:
+    hot:
+      max_age: 7d
+      max_primary_shard_size: 1gb
+    delete:
+      min_age: 14d
+  minimal_stack_ilm:
+    hot:
+      max_age: 3h
+      max_primary_shard_size: 100mb
+    delete:
+      min_age: 24h
+  resources:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m
+apmServer:
+  count: 2
+  minimal_stack_count: 1
+  image: ghcr.io/cnie-es/apm-apm-server
+  imageTag: ''
+  resources:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+  minimal_stack_resources:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m
+  ilm:
+    hot:
+      max_age: 7d
+      max_primary_shard_size: 1gb
+    delete:
+      min_age: 14d
+  minimal_stack_ilm:
+    hot:
+      max_age: 3h
+      max_primary_shard_size: 100mb
+    delete:
+      min_age: 24h
+otel_collector:
+  count: 2
+  minimal_stack_count: 1
+  resources:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+  minimal_stack_resources:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m
+metricbeat_hpa:
+  image: docker.elastic.co/beats/metricbeat
+  imageTag: ''
+  ilm:
+    hot:
+      max_age: 7d
+      max_primary_shard_size: 1gb
+    delete:
+      min_age: 1d
+  minimal_stack_ilm:
+    hot:
+      max_age: 3h
+      max_primary_shard_size: 100mb
+    delete:
+      min_age: 6h
+  cert:
+    duration: 2160h0m0s
+    renewBefore: 360h0m0s
+  resources:
+    requests:
+      memory: 100Mi
+      cpu: 50m
+    limits:
+      memory: 0.5Gi
+      cpu: 300m

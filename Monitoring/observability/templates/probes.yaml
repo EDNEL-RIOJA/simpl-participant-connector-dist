@@ -1,0 +1,79 @@
+{{- /*
+Objetos `Probe` del Prometheus Operator: le dicen al Operator "usa este blackbox
+para sondear estos destinos". El Probe es a blackbox lo que el ServiceMonitor es a un
+servicio con /metrics.
+
+1) Autodescubrimiento de Ingress: se sondean TODOS los Ingress del namespace sin
+   enumerarlos. Un Ingress nuevo queda vigilado solo, sin tocar este chart. Es la
+   opción que el propio documento sugiere (kubernetes_sd + relabeling).
+
+2) Destinos internos estáticos: para servicios sin Ingress y sin /metrics. En la
+   authority esto cubre el clearing-house, cuya alerta de caída no se puede montar
+   sobre `up{job="clearing-house"}` porque la aplicación NO expone métricas: ese `up`
+   valdría 0 permanentemente y la alerta sería ruido constante en vez de una señal.
+*/}}
+{{- if .Values.probes.enabled }}
+{{- if .Values.probes.ingressDiscovery.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: {{ include "observability.name" . }}-ingress
+  labels:
+    {{- include "observability.labels" . | nindent 4 }}
+    {{- include "observability.discoveryLabels" . | nindent 4 }}
+spec:
+  jobName: blackbox-ingress
+  interval: {{ .Values.probes.interval }}
+  scrapeTimeout: {{ .Values.probes.scrapeTimeout }}
+  module: {{ .Values.probes.ingressDiscovery.module }}
+  prober:
+    url: {{ include "observability.blackbox.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.blackbox.port }}
+    scheme: http
+    path: /probe
+  targets:
+    ingress:
+      namespaceSelector:
+        matchNames:
+          - {{ .Release.Namespace }}
+      selector:
+        {{- toYaml .Values.probes.ingressDiscovery.selector | nindent 8 }}
+      relabelingConfigs:
+        # `action: replace` EXPLICITO: es el default del CRD, pero si no se envia lo
+        # rellena el API server y ArgoCD queda OutOfSync de forma permanente.
+        - action: replace
+          targetLabel: component
+          replacement: ingress
+{{- end }}
+{{- if .Values.probes.internal.targets }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: {{ include "observability.name" . }}-internal
+  labels:
+    {{- include "observability.labels" . | nindent 4 }}
+    {{- include "observability.discoveryLabels" . | nindent 4 }}
+spec:
+  jobName: blackbox-internal
+  interval: {{ .Values.probes.interval }}
+  scrapeTimeout: {{ .Values.probes.scrapeTimeout }}
+  module: {{ .Values.probes.internal.module }}
+  prober:
+    url: {{ include "observability.blackbox.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.blackbox.port }}
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        {{- range .Values.probes.internal.targets }}
+        - {{ tpl .url $ | quote }}
+        {{- end }}
+      labels:
+        component: internal
+      relabelingConfigs:
+        # `action: replace` EXPLICITO, mismo motivo que arriba.
+        - action: replace
+          targetLabel: component
+          replacement: internal
+{{- end }}
+{{- end }}

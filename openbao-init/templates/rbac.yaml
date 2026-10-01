@@ -1,0 +1,58 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-{{ .Values.cluster.namespace }}-svc-account
+  namespace: "{{ .Values.cluster.namespace }}"
+  labels:
+    app.kubernetes.io/name: openbao-{{ .Values.cluster.namespace }}-svc-account
+    app.kubernetes.io/part-of: openbao
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openbao-{{ .Values.cluster.namespace }}-role
+  namespace: "{{ .Values.cluster.namespace }}"
+  labels:
+    app.kubernetes.io/name: openbao-{{ .Values.cluster.namespace }}-svc-account
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["create", "get", "watch", "list", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openbao-{{ .Values.cluster.namespace }}-rb
+  namespace: "{{ .Values.cluster.namespace }}"
+  labels:
+    app.kubernetes.io/name: openbao-{{ .Values.cluster.namespace }}-svc-account
+subjects:
+  - kind: ServiceAccount
+    name: openbao-{{ .Values.cluster.namespace }}-svc-account
+    namespace: "{{ .Values.cluster.namespace }}"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openbao-{{ .Values.cluster.namespace }}-role
+---
+# ClusterRoleBinding to allow OpenBao init job to validate ServiceAccount tokens
+# This is required for the token_reviewer_jwt in the Kubernetes auth method
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openbao-{{ .Values.cluster.namespace }}-token-reviewer
+  labels:
+    app.kubernetes.io/name: openbao-{{ .Values.cluster.namespace }}-svc-account
+    app.kubernetes.io/part-of: openbao
+subjects:
+  - kind: ServiceAccount
+    name: openbao-{{ .Values.cluster.namespace }}-svc-account
+    namespace: "{{ .Values.cluster.namespace }}"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator

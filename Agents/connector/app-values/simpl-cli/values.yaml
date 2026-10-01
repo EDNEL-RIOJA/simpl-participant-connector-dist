@@ -1,0 +1,45 @@
+---
+image:
+  repository: ghcr.io/cnie-es/iaa-cli
+  tag: 2.2.3
+  pullPolicy: IfNotPresent
+imagePullSecrets:
+- name: github-registry-secret
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1001
+initAuthority:
+  enabled: false
+initParticipant:
+  enabled: true
+  ptype: DATA_PROVIDER
+  hostT1: participant-be-dataprovider.example.org
+  authorityHostT1: authority-be-authority.example.org
+  csr:
+    cn: tls-participant-dataprovider.example.org
+    o: EDNEL-RIOJA
+    ou: ednel-dev
+    country: EU
+  keycloak:
+    internalHost: keycloak.dataprovider.svc.cluster.local
+    internalPort: 80
+    url: https://participant-be-dataprovider.example.org/auth
+    app:
+      realm: authority
+      clientId: cli
+      clientSecret: ''
+    master:
+      realm: master
+      user: admin
+      clientId: admin-cli
+    authority:
+      user: user
+      password: ''
+      realm: authority
+  microservices:
+    usersRolesUrl: https://participant-be-dataprovider.example.org/cli/userApi/
+    authenticationProviderUrl: https://participant-be-dataprovider.example.org/cli/authApi/

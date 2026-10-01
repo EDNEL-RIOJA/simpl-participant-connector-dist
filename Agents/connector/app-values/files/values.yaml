@@ -1,0 +1,24 @@
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+ingress:
+  secretName: files-tls
+
+# PREVENTIVO: el rol simpl-secrets-role de OpenBao solo admite las ServiceAccount que casen con
+# bound_service_account_names ("*-sa", "*-service-account", "*-service", "*-consumption-be",
+# "*-svc-account", "*<ultima letra del ns common>", "default", "keycloak", "edc-connector-adapter",
+# "rabbitmq"). Ver openbao-init/charts/templates/initjob.yaml.
+#
+# Sin sufijo, el nombre por defecto (= .Release.Name) NO casa. Hoy este componente no usa vault-env,
+# asi que no falla; el dia que lo necesite recibiria un 403 "service account name not authorized" y
+# entraria en CrashLoopBackOff — que es justo lo que le paso a edc-connector-adapter-consumer.
+serviceAccount:
+  name: simpl-files-sa

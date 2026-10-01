@@ -1,0 +1,20 @@
+# Overrides base de data-dashboard para data-provider-simpl
+replicaCount: 1
+
+image:
+  repository: ghcr.io/cnie-es/datadashboard
+  pullPolicy: Always
+  # OJO: el tag que MANDA es imagesTags.dataDashboard de Agents/connector/charts/values.yaml, que el
+  # umbrella inyecta en el bloque `values:` de la Application y tiene mas precedencia que este
+  # valueFile. Este queda como default; se mantienen alineados a proposito.
+  tag: "v1.0.4-edval"
+
+imagePullSecrets:
+  - name: github-registry-secret
+
+podSecurityContext:
+  runAsUser: 0
+
+service:
+  type: ClusterIP
+  port: 8080

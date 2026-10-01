@@ -1,0 +1,24 @@
+kafka:
+  replicas: 3
+  image:
+    registry: ghcr.io/cnie-es
+    application: confluentinc/cp-server
+    tag: 8.1.1
+    initImage: confluentinc/confluent-init-container
+    initTag: 3.1.1
+  imagePullSecrets:
+    - name: github-registry-secret
+  topic:
+    replicas: 2
+    insyncreplicas: 1
+
+kraftController:
+  replicas: 3
+  image:
+    registry: ghcr.io/cnie-es
+    application: confluentinc/cp-server
+    tag: 8.1.1
+    initImage: confluentinc/confluent-init-container
+    initTag: 3.1.1
+  imagePullSecrets:
+    - name: github-registry-secret

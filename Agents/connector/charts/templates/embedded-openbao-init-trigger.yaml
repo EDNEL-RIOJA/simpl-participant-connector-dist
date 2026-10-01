@@ -1,0 +1,117 @@
+{{- if .Values.embeddedCommon.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-init-trigger
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openbao-init-trigger
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+rules:
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["create", "get", "list", "watch", "delete"]
+- apiGroups: ["batch"]
+  resources: ["cronjobs"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openbao-init-trigger
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openbao-init-trigger
+subjects:
+- kind: ServiceAccount
+  name: openbao-init-trigger
+  namespace: {{ .Values.cluster.namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openbao-init-trigger
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  ttlSecondsAfterFinished: 60
+  backoffLimit: 3
+  template:
+    metadata:
+      name: openbao-init-trigger
+    spec:
+      serviceAccountName: openbao-init-trigger
+      imagePullSecrets:
+        - name: github-registry-secret
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: OnFailure
+      containers:
+      - name: trigger-init
+        image: ghcr.io/cnie-es/alpine-kubectl:1.35.2
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+
+          NAMESPACE="{{ .Values.cluster.namespace }}"
+          CRONJOB_NAME="openbao-init-${NAMESPACE}"
+
+          echo "=== OpenBao Init Trigger ==="
+          echo "Waiting for CronJob ${CRONJOB_NAME} to exist..."
+
+          # Wait for CronJob to be created (max 60 seconds)
+          for i in $(seq 1 12); do
+            if kubectl get cronjob ${CRONJOB_NAME} -n ${NAMESPACE} &>/dev/null; then
+              echo "CronJob found!"
+              break
+            fi
+            echo "Waiting... (${i}/12)"
+            sleep 5
+          done
+
+          if ! kubectl get cronjob ${CRONJOB_NAME} -n ${NAMESPACE} &>/dev/null; then
+            echo "ERROR: CronJob ${CRONJOB_NAME} not found after waiting"
+            exit 1
+          fi
+
+          # Always clean up previous job and re-run so new participants get their kafka credentials patched
+          if kubectl get job openbao-init-auto -n ${NAMESPACE} &>/dev/null; then
+            echo "Cleaning up previous init job..."
+            kubectl delete job openbao-init-auto -n ${NAMESPACE} --ignore-not-found=true
+            sleep 2
+          fi
+
+          # Create init job from CronJob
+          echo "Creating init job from CronJob..."
+          kubectl create job openbao-init-auto --from=cronjob/${CRONJOB_NAME} -n ${NAMESPACE}
+
+          echo "Init job created successfully!"
+          echo "Waiting for init job to complete (max 5 minutes)..."
+
+          # Wait for job to complete
+          kubectl wait --for=condition=complete --timeout=300s job/openbao-init-auto -n ${NAMESPACE} || {
+            echo "WARNING: Init job did not complete in time, but it may still be running"
+            echo "Watchdog will monitor and retry if needed"
+            exit 0
+          }
+
+          echo "=== Init job completed successfully! ==="
+{{- end }}

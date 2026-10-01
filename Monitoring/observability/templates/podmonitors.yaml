@@ -1,0 +1,44 @@
+{{- /*
+PodMonitors para componentes que ya exponen métricas Prometheus de forma nativa pero
+cuyo Service NO publica el puerto de métricas — por eso PodMonitor y no
+ServiceMonitor: el PodMonitor scrapea el pod directamente, sin depender de que exista
+un puerto en el Service.
+
+Caso principal: Patroni (Zalando Spilo, pg-cluster) sirve /metrics en :8008, un puerto
+que el Service del operator no publica.
+
+Lista vacía = no se genera nada (la authority no tiene pg-cluster propio).
+*/}}
+{{- if .Values.podMonitors.enabled }}
+{{- $top := . }}
+{{- range .Values.podMonitors.targets }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ .name }}-metrics
+  labels:
+    {{- include "observability.labels" $top | nindent 4 }}
+    {{- include "observability.discoveryLabels" $top | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ $top.Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- toYaml .selectorLabels | nindent 6 }}
+  podMetricsEndpoints:
+    - {{ if .portName }}port: {{ .portName }}{{ else }}targetPort: {{ .targetPort }}{{ end }}
+      path: {{ .path | default "/metrics" }}
+      interval: {{ $top.Values.podMonitors.interval | default "30s" }}
+      # Etiqueta estable para las reglas. No se usa `job` porque su valor lo deriva
+      # el Operator y cambiaría en silencio al renombrar el PodMonitor.
+      relabelings:
+        # `action: replace` EXPLICITO aunque sea el default del CRD: si se omite, lo
+        # rellena el API server y ArgoCD ve diferencia con el manifiesto para siempre
+        # -> la Application se queda OutOfSync sin que nada este mal.
+        - action: replace
+          targetLabel: component
+          replacement: {{ .name }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,16 @@
+{{- if .Values.kafka.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: {{ .Values.namespace }}
+  name: {{ .Release.Name }}-zookeeper-config
+  labels:
+    app: {{ .Chart.Name }}
+data:
+  zoo.cfg: |
+    tickTime={{ .Values.zookeeper.zookeeperConfig.tickTime }}
+    dataDir={{ .Values.zookeeper.zookeeperConfig.dataDir }}
+    clientPort={{ .Values.zookeeper.zookeeperConfig.clientPort }}
+    initLimit={{ .Values.zookeeper.zookeeperConfig.initLimit }}
+    syncLimit={{ .Values.zookeeper.zookeeperConfig.syncLimit }}
+{{- end }}    

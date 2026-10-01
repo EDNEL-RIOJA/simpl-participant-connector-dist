@@ -1,0 +1,445 @@
+{{- if eq .Values.namespaceTag .Values.mainNamespace }}
+apiVersion: beat.k8s.elastic.co/v1beta1
+kind: Beat
+metadata:
+  name: heartbeat
+  namespace: {{.Release.Namespace}} 
+  annotations:
+    helm.sh/hook-weight: "10"
+spec:
+  type: heartbeat
+  serviceAccountName: heartbeat-account  
+  version: {{ .Values.elasticVersion }}
+  {{- if .Values.heartbeat.image }}
+  image: {{ .Values.heartbeat.image }}:{{ .Values.elasticVersion }}
+  {{- end }}
+  elasticsearchRef:
+    name: {{ .Release.Name }}-elasticsearch
+  config:
+    heartbeat.monitors:
+    - type: http
+      schedule: '0 * * * * * *'
+      id: apm-server-apm-http-{{ .Values.namespaceTag }}
+      name: apm-server-apm-http-{{ .Values.namespaceTag }}
+      hosts: ["https://apm-server-apm-http.{{ .Values.namespaceTag }}.svc:8200"]
+      ssl:
+        verification_mode: none
+    - type: http
+      schedule: '1 * * * * * *'
+      id: elastic-elasticsearch-es-http-internal-{{ .Values.namespaceTag }}
+      name: elastic-elasticsearch-es-http-internal-{{ .Values.namespaceTag }}
+      hosts: ["https://elastic-elasticsearch-es-http.{{ .Values.namespaceTag }}.svc:9200"]
+      check.response.status: [401]
+      ssl:
+        verification_mode: none
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: logstash-beats-ls-beats-0-{{ .Values.namespaceTag }}
+      name: logstash-beats-ls-beats-0-{{ .Values.namespaceTag }}
+      hosts: ["tcp://logstash-beats-ls-beats-0.{{ .Values.namespaceTag }}.svc:5044"]
+    - type: tcp
+      schedule: '3 * * * * * *'
+      id: otel-collector-{{ .Values.namespaceTag }}
+      name: otel-collector-{{ .Values.namespaceTag }}
+      hosts: ["tcp://otel-collector.{{ .Values.namespaceTag }}.svc:4318"]
+    - type: http
+      schedule: '4 * * * * * *'
+      id: elastic-elasticsearch-es-http-public-{{ .Values.namespaceTag }}
+      name: elastic-elasticsearch-es-http-public-{{ .Values.namespaceTag }}
+      hosts: ["https://elasticsearch-{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}/"]
+      check.response.status: [401]
+    - type: http
+      schedule: '5 * * * * * *'
+      id: kibana-{{ .Values.namespaceTag }}
+      name: kibana-{{ .Values.namespaceTag }}
+      hosts: ["https://kibana-{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}/"]
+    - type: http
+      schedule: '6 * * * * * *'
+      id: mailpit-{{ .Values.namespaceTag }}
+      name: mailpit-{{ .Values.namespaceTag }}
+      hosts: ["https://mailpit-{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}/"]
+      check.response.status: [401]
+    - type: http
+      schedule: '7 * * * * * *'
+      id: pgadmin-{{ .Values.namespaceTag }}
+      name: pgadmin-{{ .Values.namespaceTag }}
+      hosts: ["https://pgadmin-{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}/"]
+    - type: http
+      schedule: '9 * * * * * *'
+      id: redpanda-{{ .Values.namespaceTag }}
+      name: redpanda-{{ .Values.namespaceTag }}
+      hosts: ["https://redpanda-{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}/"]
+      check.response.status: [401]
+    setup.ilm.enabled: true
+    setup.ilm.policy_name: heartbeat-ilm
+    setup.ilm.overwrite: true
+    setup.template.enabled: false
+    output.elasticsearch.index: "heartbeat-%{[agent.version]}-{{ .Values.namespaceTag }}"
+    processors:
+    - add_kubernetes_metadata: {}
+    - add_cloud_metadata: {}
+    - add_host_metadata: {}
+    - add_fields:
+        target: fields
+        fields:
+          namespace: {{ .Values.namespaceTag }}
+  deployment:
+    replicas: 1
+    podTemplate:
+      spec:
+        securityContext:
+          runAsUser: 0
+        {{- if .Values.imagePullSecrets }}
+        imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 4 }}
+        {{- end }}
+        {{- with .Values.nodeSelector }}
+        nodeSelector:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        containers:
+        - name: heartbeat
+          {{- with .Values.heartbeat.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: heartbeat-role-{{ .Release.Namespace }}
+rules:
+- apiGroups: [""] 
+  resources:
+  - namespaces
+  - pods
+  - nodes
+  verbs:
+  - get
+  - watch
+  - list
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: heartbeat-account
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: heartbeat-rolebinding-{{ .Release.Namespace }}
+subjects:
+- kind: ServiceAccount
+  name: heartbeat-account
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: heartbeat-role-{{ .Release.Namespace }}
+  apiGroup: rbac.authorization.k8s.io
+---
+
+{{- end }}
+{{- if ne .Values.namespaceTag .Values.mainNamespace }}
+apiVersion: beat.k8s.elastic.co/v1beta1
+kind: Beat
+metadata:
+  name: heartbeat
+  namespace: {{ .Release.Namespace}} 
+spec:
+  type: heartbeat
+  serviceAccountName: heartbeat-account
+  version: {{ .Values.elasticVersion }}
+  {{- if .Values.heartbeat.image }}
+  image: {{ .Values.heartbeat.image }}:{{ .Values.elasticVersion }}
+  {{- end }}
+  elasticsearchRef:
+    name: {{ .Release.Name }}-elasticsearch
+    namespace: {{ .Values.mainNamespace }}
+  config:
+  {{- if eq .Values.agentType "authority" }}
+    heartbeat.monitors:
+    # SERVICE Data1
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: adapter-service-{{ .Values.namespaceTag }}
+      name: adapter-service-{{ .Values.namespaceTag }}
+      hosts: ["tcp://adapter-service.{{ .Values.namespaceTag }}.svc:8084"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: authentication-provider-{{ .Values.namespaceTag }}
+      name: authentication-provider-{{ .Values.namespaceTag }}
+      hosts: ["tcp://authentication-provider.{{ .Values.namespaceTag }}.svc:8080"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: fe-authentication-provider-authentication-provider-{{ .Values.namespaceTag }}
+      name: fe-authentication-provider-authentication-provider-{{ .Values.namespaceTag }}
+      hosts: ["tcp://fe-authentication-provider-authentication-provider.{{ .Values.namespaceTag }}.svc:3000"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: fe-identity-provider-identity-provider-{{ .Values.namespaceTag }}
+      name: fe-identity-provider-identity-provider-{{ .Values.namespaceTag }}
+      hosts: ["tcp://fe-identity-provider-identity-provider.{{ .Values.namespaceTag }}.svc:3000"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: fe-onboarding-onboarding-{{ .Values.namespaceTag }}
+      name: fe-onboarding-onboarding-{{ .Values.namespaceTag }}
+      hosts: ["tcp://fe-onboarding-onboarding.{{ .Values.namespaceTag }}.svc:3000"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: fe-security-attribute-provider-security-attribute-provider-{{ .Values.namespaceTag }}
+      name: fe-security-attribute-provider-security-attribute-provider-{{ .Values.namespaceTag }}
+      hosts: ["tcp://fe-security-attribute-provider-security-attribute-provider.{{ .Values.namespaceTag }}.svc:3000"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: fe-users-and-roles-users-roles-{{ .Values.namespaceTag }}
+      name: fe-users-and-roles-users-roles-{{ .Values.namespaceTag }}
+      hosts: ["tcp://fe-users-and-roles-users-roles.{{ .Values.namespaceTag }}.svc:3000"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: identity-provider-{{ .Values.namespaceTag }}
+      name: identity-provider-{{ .Values.namespaceTag }}
+      hosts: ["tcp://identity-provider.{{ .Values.namespaceTag }}.svc:8080"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: keycloak-{{ .Values.namespaceTag }}
+      name: keycloak-{{ .Values.namespaceTag }}
+      hosts: ["tcp://keycloak.{{ .Values.namespaceTag }}.svc:80"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: onboarding-{{ .Values.namespaceTag }}
+      name: onboarding-{{ .Values.namespaceTag }}
+      hosts: ["tcp://onboarding.{{ .Values.namespaceTag }}.svc:8080"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: schema-manager-service-{{ .Values.namespaceTag }}
+      name: schema-manager-service-{{ .Values.namespaceTag }}
+      hosts: ["tcp://schema-manager-service.{{ .Values.namespaceTag }}.svc:8085"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: schema-manager-ui-{{ .Values.namespaceTag }}
+      name: schema-manager-ui-{{ .Values.namespaceTag }}
+      hosts: ["tcp://schema-manager-ui.{{ .Values.namespaceTag }}.svc:8080"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: security-attributes-provider-{{ .Values.namespaceTag }}
+      name: security-attributes-provider-{{ .Values.namespaceTag }}
+      hosts: ["tcp://security-attributes-provider.{{ .Values.namespaceTag }}.svc:8080"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: tier1-gateway-{{ .Values.namespaceTag }}
+      name: tier1-gateway-{{ .Values.namespaceTag }}
+      hosts: ["tcp://tier1-gateway.{{ .Values.namespaceTag }}.svc:9000"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: tier2-gateway-{{ .Values.namespaceTag }}
+      name: tier2-gateway-{{ .Values.namespaceTag }}
+      hosts: ["tcp://tier2-gateway.{{ .Values.namespaceTag }}.svc:443"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: users-roles-{{ .Values.namespaceTag }}
+      name: users-roles-{{ .Values.namespaceTag }}
+      hosts: ["tcp://users-roles.{{ .Values.namespaceTag }}.svc:8080"]
+    - type: tcp
+      schedule: '2 * * * * * *'
+      id: xsfc-service-{{ .Values.namespaceTag }}
+      name: xsfc-service-{{ .Values.namespaceTag }}
+      hosts: ["tcp://xsfc-service.{{ .Values.namespaceTag }}.svc:8081"]
+
+
+
+  {{- end }}
+
+  {{- if eq .Values.agentType "consumer" }}
+#========================================= NEW =======================================================================
+    heartbeat.monitors:
+
+      #Data1 Services UP
+    - type: http
+      schedule: '0 * * * * * *'
+      id: edc-connector-adapter-{{ .Values.namespaceTag }}
+      name: edc-connector-adapter-{{ .Values.namespaceTag }}
+      hosts: ["http://edc-connector-adapter.{{ .Values.namespaceTag }}.svc:8080/status"]
+    - type: http
+      schedule: '0 * * * * * *'
+      id: xfsc-advsearch-be-{{ .Values.namespaceTag }}
+      name: xfsc-advsearch-be-{{ .Values.namespaceTag }}
+      hosts: ["http://xfsc-advsearch-be.{{ .Values.namespaceTag }}.svc:8080/status"]
+    - type: http
+      schedule: '0 * * * * * *'
+      id: contract-consumption-be-{{ .Values.namespaceTag }}
+      name: contract-consumption-be-{{ .Values.namespaceTag }}
+      hosts: ["http://contract-consumption-be.{{ .Values.namespaceTag }}.svc:8080/status"]
+      #Data1 Ingress
+
+      #Catalog & Connector Services
+    - type: http
+      schedule: '0 * * * * * *'
+      id: simpl-edc-service-{{ .Values.namespaceTag }}
+      name: simpl-edc-service-{{ .Values.namespaceTag }}
+      hosts: ["http://simpl-edc-service.{{ .Values.namespaceTag }}.svc:29193/management/v3/dataplanes"]
+
+      # Contract & Billing 
+      # UP
+    - type: http
+      schedule: '35 * * * * * *'
+      id: contract-consumer-{{ .Values.namespaceTag }}
+      name: contract-consumer-{{ .Values.namespaceTag }}
+      hosts: ["http://contract-consumer.{{ .Values.namespaceTag }}.svc:8080/contract/v1/health"]
+
+#=====================================================================================================================
+
+  {{- end }}
+  {{- if eq .Values.agentType "dataprovider" }}
+    heartbeat.monitors:
+# ====================== NEW =======================
+    # SERVICE Data1
+    # UP
+    - type: http
+      schedule: '2 * * * * * *'
+      id: edc-connector-adapter-{{ .Values.namespaceTag }}
+      name: edc-connector-adapter-{{ .Values.namespaceTag }}
+      hosts: ["http://edc-connector-adapter.{{ .Values.namespaceTag }}.svc:8080/status"]
+    # UP
+    - type: http
+      schedule: '2 * * * * * *'
+      id: sdtool-validation-{{ .Values.namespaceTag }}
+      name: sdtool-validation-{{ .Values.namespaceTag }}
+      hosts: ["http://sdtool-validation.{{ .Values.namespaceTag }}.svc:8080/status"]
+    # UP
+    # INGRESS Data1
+    - type: http
+      schedule: '35 * * * * * *'
+      id: sd-tooling-be-{{ .Values.namespaceTag }}
+      name: sd-tooling-be-{{ .Values.namespaceTag }}
+      hosts: ["https://creation-wizard-api.{{ .Values.domainSuffix }}/status"]
+
+    # SERVICE Infra
+    # Down
+    - type: tcp
+      schedule: '6 * * * * * *'
+      id: infrastructure-argo-cd-repo-server-{{ .Values.namespaceTag }}
+      name: infrastructure-argo-cd-repo-server-{{ .Values.namespaceTag }}
+      hosts: ["tcp://infrastructure-argo-cd-repo-server.{{ .Values.namespaceTag }}.svc:8081"]
+    # Down      
+    - type: http
+      schedule: '6 * * * * * *'
+      id: infrastructure-argo-cd-server-{{ .Values.namespaceTag }}
+      name: infrastructure-argo-cd-server-{{ .Values.namespaceTag }}
+      hosts: ["http://infrastructure-argo-cd-server.{{ .Values.namespaceTag }}.svc:8080"]
+    # Down
+    - type: tcp
+      schedule: '6 * * * * * *'
+      id: infrastructure-argo-workflows-server-{{ .Values.namespaceTag }}
+      name: infrastructure-argo-workflows-server-{{ .Values.namespaceTag }}
+      hosts: ["tcp://infrastructure-argo-workflows-server.{{ .Values.namespaceTag }}.svc:2746"]
+    # Down
+    - type: http
+      schedule: '6 * * * * * *'
+      id: gitea-http-{{ .Values.namespaceTag }}
+      name: gitea-http-{{ .Values.namespaceTag }}
+      hosts: ["http://gitea-http.{{ .Values.namespaceTag }}.svc:3000"]
+    # INGRESS Infra
+    # Down
+    - type: http
+      schedule: '35 * * * * * *'
+      id: infrastructure-be-{{ .Values.namespaceTag }}
+      name: infrastructure-be-{{ .Values.namespaceTag }}
+      hosts: ["https://infrastructure-be.{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}"]
+    # UP
+    - type: http
+      schedule: '35 * * * * * *'
+      id: infrastructure-fe-{{ .Values.namespaceTag }}
+      name: infrastructure-fe-{{ .Values.namespaceTag }}
+      hosts: ["https://infrastructure-fe.{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}"]
+
+
+    # SERVICE Catalog Connector
+    # Down
+    - type: http
+      schedule: '2 * * * * * *'
+      id: simpl-edc-service-{{ .Values.namespaceTag }}
+      name: simpl-edc-service-{{ .Values.namespaceTag }}
+      hosts: ["https://simpl-edc-service.{{ .Values.namespaceTag }}.svc:19193/management/v3/dataplanes"]
+    # UP
+    - type: http
+      schedule: '2 * * * * * *'
+      id: signer-{{ .Values.namespaceTag }}
+      name: signer-{{ .Values.namespaceTag }}
+      hosts: ["http://signer.{{ .Values.namespaceTag }}.svc:8080/liveness"]
+
+    # INGRESS Catalog Connector
+    # UP
+    - type: http
+      schedule: '35 * * * * * *'
+      id: catalogue-ui-{{ .Values.namespaceTag }}
+      name: catalogue-ui-{{ .Values.namespaceTag }}
+      hosts: ["https://catalogue-ui.{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}"]
+    # UP
+    - type: http
+      schedule: '35 * * * * * *'
+      id: sd-ui-{{ .Values.namespaceTag }}
+      name: sd-ui-{{ .Values.namespaceTag }}
+      hosts: ["https://sd-ui.{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}"]
+    - type: http
+      schedule: '35 * * * * * *'
+      id: schema-manager-fe-{{ .Values.namespaceTag }}
+      name: schema-manager-fe-{{ .Values.namespaceTag }}
+      hosts: ["https://schema-manager-fe.{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}"]
+
+    # SERVICES C&B
+    - type: http
+      schedule: '35 * * * * * *'
+      id: contract-dataprovider-{{ .Values.namespaceTag }}
+      name: contract-dataprovider-{{ .Values.namespaceTag }}
+      hosts: ["http://contract-dataprovider.{{ .Values.namespaceTag }}.svc:8080/contract/v1/health"]
+    # INGRESS C&B
+
+
+#======================================================
+
+    # - type: http
+    #   schedule: '2 * * * * * *'
+    #   id: xxx-{{ .Values.namespaceTag }}
+    #   name: xxx-{{ .Values.namespaceTag }}
+    #   hosts: ["https://xxx.{{ .Values.namespaceTag }}.svc:9443"]
+
+    # - type: http
+    #   schedule: '35 * * * * * *'
+    #   id: xxx-{{ .Values.namespaceTag }}
+    #   name: xxx-{{ .Values.namespaceTag }}
+    #   hosts: ["https://xxx.{{ .Values.namespaceTag }}.{{ .Values.domainSuffix }}"]
+
+  {{- end }}
+    setup.ilm.enabled: true
+    setup.ilm.policy_name: heartbeat-ilm
+    setup.template.enabled: false
+    output.elasticsearch.index: "heartbeat-%{[agent.version]}-{{ .Values.namespaceTag }}"
+    processors:
+    - add_kubernetes_metadata: {}
+    - add_cloud_metadata: {}
+    - add_host_metadata: {}
+    - add_fields:
+        target: fields
+        fields:
+          namespace: {{ .Values.namespaceTag }}
+  deployment:
+    replicas: 1
+    podTemplate:
+      spec:
+        securityContext:
+          runAsUser: 0
+        {{- if .Values.imagePullSecrets }}
+        imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+        {{- end }}
+        containers:
+        - name: heartbeat
+          {{- with .Values.heartbeat.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}        
+{{- end }}
+
+
+

@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Overlay de UBICACIÓN: EXTERNO / self-hosted
+# ─────────────────────────────────────────────────────────────────────────────
+# Selecciona este overlay cuando el conector se despliega en la infraestructura
+# de un participante externo (no el core), autocontenido: el propio chart levanta
+# su common (OpenBao Shamir + Kafka + vault_webhook) en el namespace del conector,
+# sin depender del common compartido del core.
+#
+# Cuando NO se aplica este overlay (modo INTERNO / core), el conector usa el common
+# compartido del cluster (cluster.commonToolsNamespace apunta al namespace common
+# central) — es el comportamiento por defecto de values.yaml (embeddedCommon.enabled=false).
+#
+# Uso en el deployer (Argo Application → helm.valueFiles). Este overlay de UBICACIÓN va antes
+# que el de ROL (el rol es el último, para que un provider puro pueda desactivar chIngest):
+#   valueFiles:
+#     - values.yaml
+#     - values-external.yaml                           # ← este overlay
+#     - values-role-<provider|consumer>.yaml           # el rol (o ninguno = híbrido), SIEMPRE el último
+#
+# ADEMÁS, el deployer externo debe fijar (no van aquí porque dependen del namespace):
+#   cluster.commonToolsNamespace = cluster.namespace
+#   namespaceTag.common          = namespaceTag.dataprovider
+# para que los componentes apunten al Kafka/OpenBao LOCALES.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Common embebido en el propio namespace del conector (self-hosted):
+embeddedCommon:
+  enabled: true
+
+# DOMINIO DE LA AUTHORITY: no hay que declararlo aqui.
+# Un externo tiene dominio propio (su domainSuffix) pero se onboarda contra la authority del core,
+# que vive en OTRO. Al poner embeddedCommon.enabled=true (justo arriba) se activa la derivacion de
+# templates/_helpers.tpl, que decide el dominio a partir del projectStage DE LA AUTHORITY:
+#
+#     projectStage: prod        -> vallelengua.es
+#     projectStage: dev o vacio -> example.invalid   (entornos no productivos on-prem)
+#
+# Se fija `projectStage` en los values del deployer del participante. Si hiciera falta onboardarse
+# contra un dataspace distinto de este, `authorityDomainSuffix` lo sobreescribe todo.
+#
+# Ojo con example.invalid: es DNS interno de c1, asi que un participante externo de verdad (fuera de
+# esa red) no lo resuelve. Solo sirve para conectores desplegados dentro.
+
+# Forwarder de la Clearing House por HTTPS+mTLS.
+# Solo tiene sentido en participantes con ACTIVIDAD CONSUMER (consumer o híbrido): son los que
+# generan records de consumo. Aquí se activa por defecto para el externo; el overlay
+# values-role-provider.yaml (aplicado DESPUÉS) lo vuelve a desactivar para un provider puro.
+# Un participante self-hosted tiene su Kafka NO visible al Logstash central, así que reenvía sus
+# records de CH al gateway/validador del core por HTTPS con mTLS.
+# Los SECRETOS del canal (clientCertSecret, caSecret) y la gatewayUrl se inyectan en el
+# ONBOARDING del participante — NUNCA en el código de este repo.
+chIngest:
+  enabled: true
+  gatewayUrl: ""                       # se fija en el onboarding
+  clientCertSecret: ch-ingest-client-tls
+  caSecret: ch-ingest-mtls-ca
+
+# Red del LoadBalancer del endpoint mTLS (tier2-gateway), que no va por el ingress sino por
+# LoadBalancer directo. Un participante externo esta, por definicion, en un cluster que no es
+# el nuestro: las clases io.cilium/* del default `public` no existen alli y el Service se
+# quedaria <pending> PARA SIEMPRE, en silencio y sin evento de error. Sin IP no hay endpoint
+# mTLS, asi que la authority no puede alcanzarle y las negociaciones no arrancan.
+#
+# `cloud` no pone label ni loadBalancerClass y deja que lo resuelva el controlador del
+# proveedor (EKS, AKS, GKE...). Si el participante SI usa Cilium, puede volver a public/internal.
+lbNetwork: cloud
+
+# Participantes EXTERNOS: la administracion de su Keycloak es cosa suya, no
+# nuestra, y no tienen acceso a la vlan123. Se fija explicitamente para que
+# ningun cambio del default les afecte.
+adminRealmAccess: public

@@ -1,0 +1,32 @@
+{{- if .Values.initParticipant.enabled  }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-participant-job-{{ randAlphaNum 6 | lower }}
+spec:
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.podAnnotations }}
+          {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Never
+      containers:
+        - name: init-participant
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["/bin/bash", "./scripts/init-participant-bash.sh"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: init-participant-configmap
+{{- end }}

@@ -1,0 +1,231 @@
+{{- if .Values.embeddedCommon.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-init-watchdog
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+imagePullSecrets:
+  - name: github-registry-secret
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openbao-init-watchdog
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+- apiGroups: ["apps"]
+  resources: ["statefulsets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "create", "delete"]
+- apiGroups: ["batch"]
+  resources: ["cronjobs"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openbao-init-watchdog
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openbao-init-watchdog
+subjects:
+- kind: ServiceAccount
+  name: openbao-init-watchdog
+  namespace: {{ .Values.cluster.namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openbao-init-watchdog
+  namespace: {{ .Values.cluster.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openbao-init-watchdog
+  template:
+    metadata:
+      labels:
+        app: openbao-init-watchdog
+    spec:
+      serviceAccountName: openbao-init-watchdog
+      imagePullSecrets:
+        - name: github-registry-secret
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: watchdog
+        image: ghcr.io/cnie-es/alpine-kubectl:1.35.2
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+          if [ -f /etc/alpine-release ]; then apk add --no-cache jq curl; fi
+
+          NAMESPACE="{{ .Values.cluster.namespace }}"
+          OPENBAO_STATEFULSET="openbao-${NAMESPACE}"
+          INIT_CRONJOB="openbao-init-${NAMESPACE}"
+          UNSEAL_SECRET="secrets-unseal-keys"
+
+          echo "=== OpenBao Watchdog Started ==="
+          echo "Namespace: ${NAMESPACE}"
+          echo "Watching: ${OPENBAO_STATEFULSET}"
+
+          unseal_openbao() {
+            local pod=$1
+            echo "Unsealing OpenBao pod ${pod}..."
+            for n in 1 2 3; do
+              local key
+              key=$(kubectl get secret ${UNSEAL_SECRET} -n ${NAMESPACE} -o jsonpath="{.data.key${n}}" 2>/dev/null | base64 -d 2>/dev/null)
+              if [ -z "${key}" ]; then
+                echo "ERROR: ${UNSEAL_SECRET} key${n} not found, cannot unseal"
+                return 1
+              fi
+              local out
+              out=$(kubectl exec ${pod} -n ${NAMESPACE} -- sh -c "VAULT_ADDR=http://localhost:8200 bao operator unseal -format=json '${key}'" 2>/dev/null || echo '{}')
+              local still_sealed
+              still_sealed=$(echo "${out}" | jq -r '.sealed // true' 2>/dev/null)
+              echo "  Applied key${n}, sealed=${still_sealed}"
+              if [ "${still_sealed}" = "false" ]; then
+                echo "OpenBao unsealed."
+                return 0
+              fi
+            done
+            echo "ERROR: OpenBao still sealed after applying 3 keys"
+            return 1
+          }
+
+          check_and_init() {
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] === Checking OpenBao status ==="
+
+            # Wait for OpenBao StatefulSet to exist
+            if ! kubectl get statefulset ${OPENBAO_STATEFULSET} -n ${NAMESPACE} &>/dev/null; then
+              echo "OpenBao StatefulSet not found, waiting..."
+              return 0
+            fi
+
+            # Get OpenBao pod name
+            POD_NAME=$(kubectl get pods -n ${NAMESPACE} -l app.kubernetes.io/name=openbao -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+            if [ -z "$POD_NAME" ]; then
+              echo "OpenBao pod not found, waiting..."
+              return 0
+            fi
+
+            # Check if pod has reached at least Running phase (not Ready - sealed pods are not Ready)
+            POD_PHASE=$(kubectl get pod ${POD_NAME} -n ${NAMESPACE} -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+            if [ "${POD_PHASE}" != "Running" ]; then
+              echo "OpenBao pod not running (Phase=${POD_PHASE}), waiting..."
+              return 0
+            fi
+
+            # Query seal-status (works even when sealed; no auth required).
+            # bao status exits non-zero when sealed, so capture output regardless.
+            STATUS_JSON=$(kubectl exec ${POD_NAME} -n ${NAMESPACE} -- sh -c "VAULT_ADDR=http://localhost:8200 bao status -format=json" 2>/dev/null || true)
+            if [ -z "${STATUS_JSON}" ]; then
+              STATUS_JSON='{}'
+            fi
+            INITIALIZED=$(echo "${STATUS_JSON}" | jq -r '.initialized // false' 2>/dev/null)
+            SEALED=$(echo "${STATUS_JSON}" | jq -r '.sealed // true' 2>/dev/null)
+
+            echo "OpenBao initialized=${INITIALIZED} sealed=${SEALED}"
+
+            if [ "$INITIALIZED" = "false" ]; then
+              echo "=== OpenBao NOT initialized - Triggering initialization ==="
+
+              # Check if init job already exists and is running
+              JOB_EXISTS=$(kubectl get job openbao-init-watchdog-triggered -n ${NAMESPACE} 2>/dev/null && echo "yes" || echo "no")
+
+              if [ "$JOB_EXISTS" = "yes" ]; then
+                JOB_STATUS=$(kubectl get job openbao-init-watchdog-triggered -n ${NAMESPACE} -o jsonpath='{.status.succeeded}' 2>/dev/null || echo "0")
+
+                if [ "$JOB_STATUS" = "1" ]; then
+                  echo "Previous init job completed, cleaning up and will recheck..."
+                  kubectl delete job openbao-init-watchdog-triggered -n ${NAMESPACE} --ignore-not-found=true
+                  sleep 2
+                else
+                  JOB_ACTIVE=$(kubectl get job openbao-init-watchdog-triggered -n ${NAMESPACE} -o jsonpath='{.status.active}' 2>/dev/null || echo "0")
+                  if [ "$JOB_ACTIVE" = "1" ]; then
+                    echo "Init job already running, waiting..."
+                    return 0
+                  else
+                    echo "Init job failed or stuck, recreating..."
+                    kubectl delete job openbao-init-watchdog-triggered -n ${NAMESPACE} --ignore-not-found=true
+                    sleep 5
+                  fi
+                fi
+              fi
+
+              # Create init job from CronJob template if it exists
+              if kubectl get cronjob ${INIT_CRONJOB} -n ${NAMESPACE} &>/dev/null; then
+                echo "Creating init job from CronJob template..."
+                kubectl create job openbao-init-watchdog-triggered --from=cronjob/${INIT_CRONJOB} -n ${NAMESPACE}
+                echo "Init job created successfully"
+              else
+                echo "WARNING: CronJob ${INIT_CRONJOB} not found!"
+              fi
+              return 0
+            fi
+
+            # Initialized but sealed: unseal using stored Shamir keys
+            if [ "$SEALED" = "true" ]; then
+              echo "=== OpenBao SEALED - Unsealing from K8s secret ==="
+              if kubectl get secret ${UNSEAL_SECRET} -n ${NAMESPACE} &>/dev/null; then
+                unseal_openbao "${POD_NAME}" || true
+              else
+                echo "ERROR: ${UNSEAL_SECRET} not found, cannot unseal"
+              fi
+              return 0
+            fi
+
+            echo "=== OpenBao is initialized and unsealed ==="
+            kubectl delete job openbao-init-watchdog-triggered -n ${NAMESPACE} --ignore-not-found=true 2>/dev/null || true
+          }
+
+          # Initial check after startup
+          echo "Waiting 60 seconds for initial deployment to settle..."
+          sleep 60
+          check_and_init
+
+          # Main watch loop - check every 60 seconds (faster than init-only since unseal is critical)
+          echo "=== Entering watch loop (checks every 60s) ==="
+          while true; do
+            sleep 60
+            check_and_init
+          done
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+{{- end }}

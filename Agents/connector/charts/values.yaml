@@ -1,0 +1,638 @@
+---
+values:
+  repo_URL: https://github.com/cnie-es/edval-conector.git
+  branch: v3.1.8-test.11
+project: "${PROJECT}"
+domainSuffix: "${DOMAINSUFFIX}"
+internalDomainSuffix: ''
+projectStage: ''
+authorityDomainSuffix: ''
+namespaceTag:
+  dataprovider: "${NAMESPACETAG}"
+  authority: "${AUTHNAMESPACETAG}"
+  common: "${COMMONSPACETAG}"
+resourcePreset: default
+imagesTags:
+  authenticationProvider: 2.10.1
+  feAuthenticationProvider: ednel-v1.0.4
+  tier1Gateway: 2.11.0
+  tier2Gateway: 2.10.0
+  tier2Proxy: 1.5.1
+  usersRoles: 9c15e07
+  usersRolesFe: ednel-v1.0.4
+  sdtoolingApiBe: 1.25.0-edval
+  sdtoolingValidationApiBe: 1.20.0
+  simplFiles: 1.2.0
+  xfscAdvsearch: 1.22.0
+  contractConsumptionBe: 1.20.0-edval
+  edcConnectorAdapter: '9447144'
+  sdUi: 1.8.0-edval
+  signer: 0.0.1
+  simplCatalogueClient: 2.3.2
+  simplEdc: 35a3af2
+  infrastructureBe: 1.3.4
+  infrastructureFe: 1.2.1
+  monitoring: 0.5.4
+  dataDashboard: v1.0.4-edval
+  contract: 590ab9b
+  stubs: 2.1.0
+argocd:
+  appname: "${NAMESPACE}"
+  namespace: "${ARGOCDNAMESPACE}"
+cluster:
+  address: https://kubernetes.default.svc
+  namespace: "${NAMESPACE}"
+  commonToolsNamespace: "${COMMONNAMESPACE}"
+  issuer: "${CLUSTERISSUER}"
+  internalIssuer: "${CLUSTERINTERNALISSUER}"
+secrets:
+  secretEngine: "${SECRETENGINE}"
+  role: "${SECRETROLE}"
+  tlsSecret: ''
+  caBundle: ''
+embeddedCommon:
+  enabled: false
+wildcardTlsExternal: false
+lbNetwork: public
+caTrust:
+  enabled: false
+  secretName: ''
+  caKey: ca.crt
+  alias: external-ca
+agentList:
+  authorities: []
+  consumers: []
+  providers: []
+openbao:
+  repo_URL: https://github.com/openbao/openbao-helm.git
+  targetRevision: openbao-0.19.1
+  path: charts/openbao
+  valueFiles:
+  - values.yaml
+  resources:
+    requests:
+      cpu: '0'
+      memory: '0'
+openbao_init:
+  path: openbao-init/charts
+  repo_URL: https://github.com/cnie-es/edval-conector.git
+  targetRevision: v3.1.8-test.11
+  chart_name: openbao-init
+vault_webhook:
+  repo_URL: https://github.com/bank-vaults/vault-secrets-webhook.git
+  targetRevision: main
+  path: deploy/charts/vault-secrets-webhook
+  image:
+    registry: ghcr.io/cnie-es
+    repository: openbao/openbao
+    tag: 2.5.0
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+confluent_operator:
+  chart: confluent-for-kubernetes
+  repo_URL: https://packages.confluent.io/helm
+  targetRevision: 0.1351.59
+  nameOverride: confluent-operator
+  image:
+    registry: ghcr.io/cnie-es
+    application: confluentinc/confluent-operator
+    tag: 0.1351.59
+kafka:
+  ha: false
+  repo_URL: https://github.com/cnie-es/edval-conector.git
+  path: kafka/charts
+  targetRevision: v3.1.8-test.11
+  chart_name: kafka
+  image:
+    registry: ghcr.io/cnie-es
+    application: confluentinc/cp-server
+    tag: 8.1.1
+    initImage: confluentinc/confluent-init-container
+    initTag: 3.1.1
+  auth:
+    enabled: true
+    secretMethod: vault
+  topic:
+    autocreate: false
+  listeners:
+    tls:
+      port: 9094
+  resources:
+    kafka:
+      requests:
+        cpu: 400m
+        memory: 400Mi
+      limits:
+        cpu: 2
+        memory: 4Gi
+    kraftController:
+      requests:
+        cpu: 400m
+        memory: 400Mi
+      limits:
+        cpu: 2
+        memory: 4Gi
+  valueFiles:
+  - values.yaml
+crossplane:
+  enabled: false
+  path: external/crossplane
+  targetRevision: 1.16.2
+  chart_name: crossplane
+  kafka:
+    username: "${CROSSPLANEKAFKAUSER}"
+    password: "${CROSSPLANEKAFKAPASS}"
+  gitea:
+    username: "${CROSSPLANEGITEAUSER}"
+    password: "${CROSSPLANEGITEAPASS}"
+  resourcesCrossplane:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  resourcesRBACManager:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+redis:
+  path: external/redis
+  targetRevision: 19.6.0
+  chart_name: redis
+  nameOverride: redis
+  resourcesPreset: none
+  resources:
+    requests:
+      cpu: '0'
+      memory: '0'
+  valueFiles:
+  - values.yaml
+redis_commander:
+  enabled: false
+  repo_URL: https://github.com/joeferner/redis-commander.git
+  targetRevision: master
+  nameOverride: redis-commander
+  path: k8s/helm-chart/redis-commander
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  valueFiles:
+  - values.yaml
+keycloak:
+  adminUser:
+    firstName: Admin
+    lastName: Dataprovider
+    email: admin.dataprovider@email.com
+  path: external/keycloak
+  chart_name: keycloak
+  targetRevision: 22.2.5
+  nameOverride: keycloak
+  resourcesPreset: none
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  valueFiles:
+  - values.yaml
+signer:
+  enabled: true
+  path: Gaia-X-EDC/signer
+  targetRevision: 0.0.7
+  chart_name: signer
+  serviceAccountName: signer-service-account
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+tier1_gateway:
+  path: IAA/tier1-gateway
+  targetRevision: 2.8.0
+  chart_name: tier1-gateway
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+sdtooling_api_be:
+  enabled: true
+  path: Data1/sdtooling-api-be/sd-creation-wizard
+  targetRevision: 1.19.0
+  chart_name: sd-creation-wizard
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+  nameOverride: sd
+sdtooling_validation_api_be:
+  enabled: true
+  path: Data1/sdtooling-validation-api-be/sd-creation-wizard
+  targetRevision: 1.17.0
+  chart_name: sd-creation-wizard
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+  nameOverride: sd-validation
+xfsc_advsearch_be:
+  enabled: true
+  path: Data1/xfsc-advsearch
+  targetRevision: 1.18.0
+  chart_name: xfsc-advsearch
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+  nameOverride: xfsc-advsearch-be
+contract_consumption_be:
+  enabled: true
+  path: Data1/contract-consumption-be/charts
+  nameOverride: contract-consumption-be
+  valueFiles:
+  - values.yaml
+users_roles_fe:
+  path: IAA/users-roles-fe/fe-users-and-roles
+  targetRevision: 2.8.3
+  chart_name: fe-users-and-roles
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+users_roles:
+  path: IAA/users-roles
+  targetRevision: 2.8.0
+  chart_name: users-roles
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+sd_ui:
+  enabled: false
+  path: Gaia-X-EDC/sd-ui
+  targetRevision: 1.5.0
+  chart_name: sd-ui
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+infrastructure_be:
+  path: Infrastructure/infrastructure-be
+  targetRevision: 1.3.4
+  chart_name: infrastructure-be
+  fullnameOverride: infrastructure-be
+  resources:
+    requests:
+      cpu: 250m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 750Mi
+  valueFiles:
+  - values.yaml
+infrastructure_fe:
+  path: Infrastructure/infrastructure-fe/frontend
+  targetRevision: 1.2.1
+  chart_name: frontend
+  fullnameOverride: infrastructure-fe
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+tier2_gateway:
+  path: IAA/tier2-gateway
+  targetRevision: 2.8.0
+  chart_name: tier2-gateway
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+  - values-routes.yaml
+tier2_proxy:
+  path: IAA/tier2-proxy
+  targetRevision: 1.2.1
+  chart_name: tier2-proxy
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+simpl_edc:
+  enabled: true
+  path: Gaia-X-EDC/simpl-edc/edc
+  targetRevision: 1.0.21
+  chart_name: edc
+  nameOverride: simpl-edc
+  resources:
+    requests:
+      cpu: '1'
+      memory: 2Gi
+    limits:
+      cpu: '2'
+      memory: 2Gi
+  valueFiles:
+  - values.yaml
+  - values-hybrid.yaml
+simpl_edc_consumer:
+  enabled: false
+  path: Gaia-X-EDC/simpl-edc/edc
+  chart_name: edc
+  nameOverride: simpl-edc-consumer
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+  - values-consumer.yaml
+edc_connector_adapter:
+  enabled: true
+  path: Gaia-X-EDC/edc-connector-adapter
+  targetRevision: 1.10.1
+  chart_name: edc-connector-adapter
+  nameOverride: edc-connector-adapter
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+edc_connector_adapter_consumer:
+  enabled: true
+  path: Gaia-X-EDC/edc-connector-adapter
+  chart_name: edc-connector-adapter
+  nameOverride: edc-connector-adapter-consumer
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+simpl_catalogue_client:
+  enabled: false
+  path: Gaia-X-EDC/simpl-catalogue-client/catalogue-ui
+  targetRevision: 2.2.0
+  chart_name: catalogue-ui
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+auth_provider_fe:
+  path: IAA/fe-authentication-provider
+  targetRevision: 2.8.0
+  chart_name: fe-authentication-provider
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+auth_provider:
+  path: IAA/authentication-provider
+  targetRevision: 2.8.0
+  chart_name: authentication-provider
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  valueFiles:
+  - values.yaml
+dagster:
+  enabled: false
+monitoring:
+  enabled: true
+  path: Monitoring/eck-monitoring/charts
+  targetRevision: 0.5.4
+  chart_name: eck-monitoring
+  fullnameOverride: elastic
+  resources:
+    filebeat:
+      requests:
+        memory: 100Mi
+        cpu: 100m
+  valueFiles:
+  - values.yaml
+contract:
+  path: Contract-Billing/simpl-contract
+  targetRevision: 2.5.0
+  chart_name: simpl-contract
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 700Mi
+  valueFiles:
+  - values.yaml
+  fullnameOverride: contract-dataprovider
+contract_consumer:
+  enabled: true
+  path: Contract-Billing/simpl-contract
+  chart_name: simpl-contract
+  fullnameOverride: contract-consumer
+  resources:
+    requests:
+      cpu: 300m
+      memory: 700Mi
+    limits:
+      cpu: 300m
+      memory: 700Mi
+  valueFiles:
+  - values.yaml
+stubs:
+  path: Contract-Billing/simpl-stubs
+  targetRevision: 2.0.2
+  chart_name: simpl-stubs
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+files:
+  enabled: true
+  path: Data1/simpl-files
+  targetRevision: 1.2.0
+  chart_name: simpl-files
+  nameOverride: simpl-files
+  resources:
+    requests:
+      cpu: 250m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+provisionerresources:
+  path: Infrastructure/infrastructure-crossplane
+  targetRevision: 2.1.2
+  chart_name: infrastructure-crossplane
+  nameOverride: infrastructure-crossplane
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500Mi
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  valueFiles:
+  - values.yaml
+eso:
+  path: external/external-secrets
+  targetRevision: 0.18.1
+  chart_name: external-secrets
+  nameOverride: external-secrets
+data_dashboard:
+  enabled: true
+  path: external/data-dashboard
+  targetRevision: 0.1.0
+  chart_name: data-dashboard
+  nameOverride: data-dashboard
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+  valueFiles:
+  - values.yaml
+pg_operator:
+  repo_URL: https://github.com/zalando/postgres-operator.git
+  path: charts/postgres-operator
+  targetRevision: v1.15.1
+  image:
+    registry: ghcr.io/cnie-es
+    repository: zalando-postgres-operator
+    tag: v1.15.1
+pg_cluster:
+  repo_URL: https://github.com/cnie-es/edval-conector.git
+  path: postgres-cluster/charts
+  targetRevision: v3.1.8-test.11
+  volumeSize: 20Gi
+  storageClass: ''
+  image:
+    registry: ghcr.io/cnie-es
+    repository: spilo-17
+    tag: 4.0-p2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 200Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+chIngest:
+  enabled: false
+  gatewayUrl: ''
+  clientCertSecret: ch-ingest-client-tls
+  caSecret: ch-ingest-mtls-ca
+observability:
+  enabled: true
+  path: Monitoring/observability
+  chart_name: observability
+  fullnameOverride: observability
+  valueFiles:
+  - values.yaml
+signerTokenRefresh:
+  enabled: false
+  schedule: 0 3 * * *
+  deploymentName: signer
+  image: ghcr.io/cnie-es/alpine-kubectl:1.35.2
+adminRealmAccess: public
+adminHost: ''
+adminIngressTarget: ''
+adminAllowlistSourceRange: 10.123.0.1/32
+configFiles:
+  baseUrl: ''
+  tokenRef: ''
+  insecureTls: false
+  realmExportPath: keycloak_realms_config/data-provider-participant-realm-export.json
+  themePath: keycloak_themes/keycloak-theme-for-kc-all-other-versions.jar
+  authenticatorPath: keycloak_authenticator/keycloak-authenticator-2.2.0.jar

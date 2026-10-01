@@ -1,0 +1,57 @@
+PUT kbn:/api/alerting/rule/a8a775e1-7220-405e-863e-e4ea9e61b039
+{
+  "name": "Tags failures business",
+  "tags": [],
+  "schedule": {
+    "interval": "12m"
+  },
+  "params": {
+    "criteria": [
+      {
+        "comparator": ">",
+        "metrics": [
+          {
+            "name": "A",
+            "aggType": "count"
+          }
+        ],
+        "threshold": [
+          0
+        ],
+        "timeSize": 10,
+        "timeUnit": "m"
+      }
+    ],
+    "alertOnNoData": true,
+    "alertOnGroupDisappear": true,
+    "searchConfiguration": {
+      "query": {
+        "query": "tags : \"_dateparsefailure\" or tags : \"_grokparsefailure\"",
+        "language": "kuery"
+      },
+      "index": "ee15d384-2d79-43e8-90a4-8012b5c7a46a"
+    }
+  },
+  "actions": [
+    {
+      "group": "custom_threshold.fired",
+      "id": "23a272da-9efb-473c-9486-1466a09c3ada",
+      "params": {
+        "documents": [
+          {
+            "@timestamp": "{{date}}",
+            "rule_id": "{{rule.id}}",
+            "rule_name": "{{rule.name}}",
+            "context_reason": "{{context.reason}}"
+          }
+        ]
+      },
+      "frequency": {
+        "notify_when": "onActiveAlert",
+        "throttle": null,
+        "summary": false
+      },
+      "uuid": "86e129ad-1741-4d05-994a-f17d9d11ca76"
+    }
+  ]
+}

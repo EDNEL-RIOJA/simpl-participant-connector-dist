@@ -1,0 +1,80 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openbao-k8s-auth-config
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      serviceAccountName: openbao-{{ .Values.cluster.namespace }}-svc-account
+      imagePullSecrets:
+        - name: github-registry-secret
+      restartPolicy: Never
+      containers:
+      - name: configure-k8s-auth
+        image: "ghcr.io/cnie-es/openbao:2.4.3"
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+
+            # Wait for OpenBao to be ready
+            echo "Waiting for OpenBao to be ready..."
+            until wget -O /dev/null --quiet --timeout=10 --tries=1 --no-check-certificate https://openbao-{{ .Values.cluster.namespace }}:8200/v1/sys/health 2>/dev/null; do
+              echo "OpenBao not ready yet, waiting..."
+              sleep 5
+            done
+
+            echo "OpenBao is ready, configuring Kubernetes auth backend..."
+
+            # Get root token from secret
+            ROOT_TOKEN=$(cat /var/run/secrets/openbao/root-token)
+
+            # Get service account token and CA cert
+            SA_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+            K8S_CA_CERT=$(cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt)
+            K8S_HOST="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}"
+
+            # Unset VAULT_NAMESPACE to avoid conflicts
+            unset VAULT_NAMESPACE
+
+            export VAULT_TOKEN=$ROOT_TOKEN
+            export VAULT_ADDR=https://openbao-{{ .Values.cluster.namespace }}:8200
+            export VAULT_SKIP_VERIFY=true
+
+            # Enable Kubernetes auth if not already enabled
+            bao auth enable kubernetes 2>/dev/null || echo "Kubernetes auth already enabled"
+
+            # Configure Kubernetes auth backend
+            echo "Configuring Kubernetes auth backend..."
+            bao write auth/kubernetes/config \
+              kubernetes_host="$K8S_HOST" \
+              kubernetes_ca_cert="$K8S_CA_CERT" \
+              token_reviewer_jwt="$SA_TOKEN"
+
+            echo "Kubernetes auth backend configured successfully!"
+
+            # Verify configuration
+            bao read auth/kubernetes/config || echo "Warning: Could not verify configuration"
+
+        env:
+          - name: VAULT_ADDR
+            value: https://openbao-{{ .Values.cluster.namespace }}:8200
+          - name: VAULT_SKIP_VERIFY
+            value: "true"
+        volumeMounts:
+        - name: root-token
+          mountPath: /var/run/secrets/openbao
+          readOnly: true
+      volumes:
+      - name: root-token
+        secret:
+          secretName: secrets-root-token
+          items:
+          - key: token
+            path: root-token

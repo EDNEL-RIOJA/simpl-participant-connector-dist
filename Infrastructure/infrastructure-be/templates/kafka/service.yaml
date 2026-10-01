@@ -1,0 +1,23 @@
+{{- if .Values.kafka.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{ .Values.namespace }}
+  name: {{ include "infra-backend.fullname" . }}-kafka-svc
+  labels:
+    app: {{ .Chart.Name }}
+spec:
+  type: {{ .Values.kafka.service.type }}
+  ports:
+    - port: {{ .Values.kafka.service.port }}
+      targetPort: {{ .Values.kafka.service.port }}
+      name: kafka-client
+    - port: {{ .Values.kafka.service.internalPort }}
+      targetPort: {{ .Values.kafka.service.internalPort }}
+      name: kafka-internal
+    - port: {{ .Values.kafka.service.jmxPort }}
+      targetPort: {{ .Values.kafka.service.jmxPort }}
+      name: kafka-jmx-port
+  selector:
+    app: {{ .Chart.Name }}
+{{- end }}    

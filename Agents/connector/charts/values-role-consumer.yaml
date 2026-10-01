@@ -1,0 +1,30 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Overlay de ROL: CONSUMER puro
+# ─────────────────────────────────────────────────────────────────────────────
+# Selecciona este overlay cuando el conector actúa SOLO como consumer.
+# El EDC sigue siendo la imagen híbrida (una instancia simpl-edc capaz de ambos
+# roles); este overlay únicamente desactiva los servicios auxiliares exclusivos
+# del lado provider (firma de SD, SD Tooling, ficheros), que un consumer no usa.
+#
+# Uso en el deployer (Argo Application → helm.valueFiles). El overlay de ROL va SIEMPRE el último:
+#   valueFiles:
+#     - values.yaml                 # base = HÍBRIDO (todo activado)
+#     - values-external.yaml        # (opcional) si es self-hosted / externo
+#     - values-role-consumer.yaml   # ← este overlay (SIEMPRE el último)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Componentes exclusivos del lado PROVIDER → off en un consumer puro:
+signer:
+  enabled: false
+sdtooling_api_be:
+  enabled: false
+sdtooling_validation_api_be:
+  enabled: false
+sd_ui:
+  enabled: false
+files:
+  enabled: false
+
+# Un consumer SÍ alimenta la Clearing House. Si además es externo (self-hosted), values-external.yaml
+# ya activó chIngest; este overlay no lo toca (se respeta lo que fije la ubicación). Un consumer
+# INTERNO/core no aplica values-external.yaml → chIngest queda off (usa el Kafka central directo).

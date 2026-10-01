@@ -1,0 +1,118 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: provision
+  namespace: {{ .Release.Namespace }}
+spec:
+  eventBusName: provisioner-eventbus
+  template:
+    serviceAccountName: provisioner-events
+  dependencies:
+    - name: message
+      eventSourceName: provision
+      eventName: provisionRequest
+  triggers:
+    - rateLimit:
+        unit: Second
+        requestsPerUnit: 1
+      template:
+        name: argo-workflow-trigger
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: provision-
+                namespace: {{ .Release.Namespace }}
+              spec:
+                podGC:
+                  strategy: OnPodCompletion
+                  deleteDelayDuration: 60s
+                serviceAccountName: provisioner-workflows
+                synchronization:
+                  mutex:
+                    name: gitops-write
+                entrypoint: main
+                workflowMetadata:
+                  labels:
+                    operation: provision
+                    observer: "true"
+                  labelsFrom:
+                    uuid:
+                      expression: workflow.parameters.scriptTriggerId
+                arguments:
+                  parameters:
+                    - name: scriptTriggerId
+                    - name: provisioningMechanism
+                    - name: cloudProvider
+                    - name: cloudAccount
+                    - name: body
+                templates:
+                  - name: main
+                    container:
+                      imagePullPolicy: IfNotPresent
+                      image: {{ .Values.gitopsWorkflowImage }}
+                      env:
+                        - name: GIT_USER
+                          valueFrom:
+                            secretKeyRef:
+                              name: gitea-secret
+                              key: username
+                        - name: GIT_PASSWORD
+                          valueFrom:
+                            secretKeyRef:
+                              name: gitea-secret
+                              key: password
+                        - name: GIT_URL
+                          value: {{ .Values.giteaUrl }}
+                        - name: NAMESPACE
+                          value: {{ .Release.Namespace }}
+                        - name: UUID
+                          value: {{`"{{workflow.parameters.scriptTriggerId}}"`}}
+                        - name: MECHANISM
+                          value: {{`"{{workflow.parameters.provisioningMechanism}}"`}}
+                        - name: CLOUD_PROVIDER
+                          value: {{`"{{workflow.parameters.cloudProvider}}"`}}
+                        - name: CLOUD_ACCOUNT
+                          value: {{`"{{workflow.parameters.cloudAccount}}"`}}
+                        - name: BODY
+                          value: {{`"{{workflow.parameters.body}}"`}}
+                        - name: UUID_PLACEHOLDERS
+                          value: "true"
+                      command: [python]
+                      args: [ "main.py", "provision" ]
+                      workingDir: /app
+                    outputs:
+                      parameters:
+                        - name: log
+                          valueFrom:
+                            path: /tmp/output.log
+                    metadata:
+                      labels:
+                        app: workflow-provision
+          parameters:
+            - src:
+                dependencyName: message
+                dataKey: headers.scriptTriggerId
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: message
+                dataKey: headers.provisioningMechanism
+                value: ""
+              dest: spec.arguments.parameters.1.value
+            - src:
+                dependencyName: message
+                dataKey: headers.cloudProvider
+                value: ""
+              dest: spec.arguments.parameters.2.value
+            - src:
+                dependencyName: message
+                dataKey: headers.cloudAccount
+                value: ""
+              dest: spec.arguments.parameters.3.value
+            - src:
+                dependencyName: message
+                dataKey: body
+              dest: spec.arguments.parameters.4.value

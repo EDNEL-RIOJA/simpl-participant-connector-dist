@@ -1,0 +1,73 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ .Values.argocd.appname }}-postgres
+  namespace: {{ .Values.argocd.namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - ApplyOutOfSyncOnly=true
+      - CreateNamespace=true
+      - ServerSideApply=true
+  # The postgres-operator chart renders the cluster-scoped ClusterRole
+  # `postgres-pod` identically across every participant install (only the
+  # rules matter for postgres-operator to function). However each helm
+  # release stamps its own `app.kubernetes.io/instance` label and ArgoCD
+  # writes its own tracking-id annotation, so whichever participant app
+  # syncs last wins ownership and every other participant ends up
+  # permanently OutOfSync on metadata that has zero functional impact.
+  # Ignoring these two paths lets all participants stay Synced without
+  # fighting over ownership of a shared cluster-scoped resource.
+  ignoreDifferences:
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: postgres-pod
+      jsonPointers:
+        - /metadata/annotations/argocd.argoproj.io~1tracking-id
+        - /metadata/labels/app.kubernetes.io~1instance
+  project: {{ .Values.project }}
+  destination:
+    server: {{ .Values.cluster.address }}
+    namespace: {{ .Values.cluster.namespace }}
+  sources:
+  - repoURL: {{ .Values.pg_operator.repo_URL }}
+    targetRevision: {{ .Values.pg_operator.targetRevision }}
+    path: {{ .Values.pg_operator.path }}
+    helm:
+      values: |
+        fullnameOverride: pg-operator-{{ .Values.cluster.namespace }}
+        image:
+          registry: {{ .Values.pg_operator.image.registry }}
+          repository: {{ .Values.pg_operator.image.repository }}
+          tag: {{ .Values.pg_operator.image.tag }}
+        imagePullSecrets:
+          - name: github-registry-secret
+        {{- if .Values.nodeSelector }}
+        nodeSelector: {{- toYaml .Values.nodeSelector | nindent 10 }}
+        {{- end }}
+        configKubernetes:
+          watched_namespace: {{ .Values.cluster.namespace }}
+  - repoURL: {{ .Values.pg_cluster.repo_URL }}
+    targetRevision: {{ .Values.pg_cluster.targetRevision }}
+    path: {{ .Values.pg_cluster.path }}
+    helm:
+      values: |
+        name: pg-cluster
+        volumeSize: {{ .Values.pg_cluster.volumeSize }}
+        {{- if .Values.pg_cluster.storageClass }}
+        storageClass: {{ .Values.pg_cluster.storageClass }}
+        {{- end }}
+        image:
+          registry: {{ .Values.pg_cluster.image.registry }}
+          repository: {{ .Values.pg_cluster.image.repository }}
+          tag: {{ .Values.pg_cluster.image.tag }}
+        {{- if .Values.pg_cluster.resources }}
+        resources: {{- toYaml .Values.pg_cluster.resources | nindent 10 }}
+        {{- end }}
+        providerList:
+          - {{ .Values.cluster.namespace }}

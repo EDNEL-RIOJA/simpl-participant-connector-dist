@@ -1,0 +1,7 @@
+namespace: ""
+commonNamespace: ""
+secretEngine: ""
+secretRole: ""
+imagePullSecretName: github-registry-secret
+kubectl:
+  image: ghcr.io/cnie-es/alpine-kubectl:1.35.2

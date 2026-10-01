@@ -1,0 +1,53 @@
+image:
+  # c1/on-prem: Harbor (este app-values pisa el repository del chart; con registry=harbor del
+  # chart, "cnie-es/keycloak" daba harbor.c0.example.invalid/ednel-rioja/k8s-images
+  # /keycloak -> proyecto inexistente -> 401). Harbor c1-apps permite pull anónimo.
+  registry: ghcr.io/cnie-es
+  repository: keycloak
+# Chart 25.2.0: imagePullSecrets y allowInsecureImages se leen bajo global.* (no top-level).
+global:
+  # c1/on-prem: SIN imagePullSecrets — Harbor c1-apps es de pull anónimo y el github-registry-secret
+  # ni existe en el ns del participante (daba FailedToRetrieveImagePullSecret). Ver flag general.
+  imagePullSecrets: []
+  security:
+    allowInsecureImages: true
+# vault-env solo resuelve referencias "vault:" en variables de entorno, no en ficheros, así que
+# hay que desactivar el montaje de credenciales como ficheros (default true en 25.2.0).
+usePasswordFiles: false
+
+auth:
+  adminUser: "admin" # update
+
+postgresql:
+  enabled: false
+
+externalDatabase:
+  annotations: {}
+  existingSecret: ""
+  existingSecretDatabaseKey: ""
+  existingSecretHostKey: ""
+  existingSecretPasswordKey: ""
+  existingSecretPortKey: ""
+  existingSecretUserKey: ""
+  port: 5432
+
+extraVolumes:
+  - name: spi-volume
+    emptyDir: {}
+  - name: realm-volume
+    emptyDir: {}
+  - name: realm-config-volume
+    emptyDir: {}
+  - name: theme-volume
+    emptyDir: {}
+
+extraVolumeMounts:
+  - name: spi-volume
+    mountPath: /opt/bitnami/keycloak/providers/keycloak-authenticator.jar
+    subPath: keycloak-authenticator.jar
+  - name: realm-volume
+    mountPath: /opt/bitnami/keycloak/data/import/realm.json
+    subPath: realm.json
+  - name: theme-volume
+    mountPath: /opt/bitnami/keycloak/providers/keycloakify-starter.jar
+    subPath: keycloakify-starter.jar

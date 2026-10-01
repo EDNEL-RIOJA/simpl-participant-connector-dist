@@ -1,0 +1,4 @@
+apiVersion: v2
+name: openbao-seeder
+description: Seeds dataprovider participant secrets into common OpenBao using kubernetes auth
+version: 1.0.0

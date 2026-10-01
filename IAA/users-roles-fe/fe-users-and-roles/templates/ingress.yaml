@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: simpl-fe-ingress-{{ .Values.name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    k8s.apisix.apache.org/enable-cors: "true"
+    k8s.apisix.apache.org/proxy-read-timeout: "3600"
+    k8s.apisix.apache.org/proxy-send-timeout: "3600"
+    k8s.apisix.apache.org/cors-allow-headers: Access-Control-Allow-Headers,Access-Control-Allow-Credentials,Access-Control-Allow-Origin,Access-Control-Allow-Methods,Keep-Alive,User-Agent,Content-Type,Authorization,Tenant,Channel,Platform,Set-Cookie,geolocation,x-mobility-mode,device,Cache-Control,X-Request-With,Accept,Origin
+    k8s.apisix.apache.org/cors-allow-origin: {{ tpl .Values.cors.allowOrigin . }}
+    {{- if and .Values.ingress.issuer (not (.Values.ingress.tls | default dict).secretName) }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.issuer }}
+    cert-manager.io/renew-before: "720h"
+    {{- end }}
+    k8s.apisix.apache.org/cors-allow-credentials: "true"
+spec:
+  ingressClassName: apisix
+  tls:
+    - hosts:
+        - {{ tpl .Values.hostFe . }}
+      secretName: {{ (.Values.ingress.tls | default dict).secretName | default (printf "%s-cert" (tpl .Values.hostFe .)) }}
+  rules:
+    -
+      host: {{ tpl .Values.hostFe . }}
+      http:
+        paths:
+        - path: "{{ .Values.path }}/*"
+          pathType: ImplementationSpecific
+          backend:
+            service:
+              name: {{ $.Chart.Name }}-{{ $.Values.name }}
+              port:
+                number: {{ .Values.service.port }}

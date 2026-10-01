@@ -1,0 +1,22 @@
+name: pg-cluster
+volumeSize: 20Gi
+storageClass: ""
+instances: 3
+maxConnections: 500
+image:
+  registry: ghcr.io/cnie-es
+  repository: spilo-17
+  tag: 4.0-p2
+resources:
+  requests:
+    cpu: 10m
+    memory: 100Mi
+  limits:
+    cpu: 500m
+    memory: 500Mi
+
+authorityList: {}
+
+consumerList: {}
+
+providerList: {}

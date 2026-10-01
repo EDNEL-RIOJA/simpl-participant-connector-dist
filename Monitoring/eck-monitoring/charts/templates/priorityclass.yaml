@@ -1,0 +1,10 @@
+{{- if .Values.daemonset.priorityClass.enabled }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ .Values.daemonset.priorityClass.name }}-{{ .Release.Namespace }}
+value: {{ .Values.daemonset.priorityClass.value }}
+preemptionPolicy: PreemptLowerPriority
+globalDefault: false
+description: "High priority class for monitoring DaemonSets (filebeat, metricbeat) in namespace {{ .Release.Namespace }}. Ensures scheduling on every node and preempts lower-priority pods when node resources are exhausted."
+{{- end }}

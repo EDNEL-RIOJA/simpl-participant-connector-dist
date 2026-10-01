@@ -1,0 +1,46 @@
+contractmanager:
+  extension:
+    enabled: true
+  # La instancia consumer del EDC habla con el Contract Manager en modo CONSUMER.
+  url: http://contract-consumer:8080/contract/v1
+
+tls:
+  url:
+    authenticationprovider: "http://authentication-provider:8080"
+    # Si se define, un init container resuelve el participantId canonico (UUID) desde el
+    # authentication-provider y se exporta como edc_participant_id, ignorando env.edcParticipantId
+    # (= namespace). Mismo participante que la instancia provider (Agente hibrido unico).
+    participantIdSource: "http://authentication-provider:8080/v1/credentials"
+
+javadebug:
+  enabled: false
+  port: 5006
+
+serviceAccount:
+  # Nombre propio para no colisionar con la instancia provider (simpl-edc-service-account).
+  name: simpl-edc-consumer-service-account
+
+ingress:
+  enabled: false
+
+# EDC transfer-proxy keypair wiring. Reutiliza el mismo Secret k8s `edc-transfer-key`
+# (generado por el openbao-seeder), compartido por ambas instancias del EDC.
+extraEnvVars:
+  - name: edc.transfer.proxy.token.signer.privatekey.alias
+    value: edc-transfer-key
+  - name: edc.transfer.proxy.token.verifier.publickey.alias
+    value: edc-transfer-key-pub
+  - name: edc.iam.publickeys.transfer-proxy.id
+    value: edc-transfer-key-pub
+  - name: OTEL_SDK_DISABLED
+    value: "true"
+  - name: edc.iam.publickeys.transfer-proxy.value
+    valueFrom:
+      secretKeyRef:
+        name: edc-transfer-key
+        key: public
+  - name: edc-transfer-key
+    valueFrom:
+      secretKeyRef:
+        name: edc-transfer-key
+        key: private

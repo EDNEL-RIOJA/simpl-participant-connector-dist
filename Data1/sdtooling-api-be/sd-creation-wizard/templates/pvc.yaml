@@ -1,0 +1,12 @@
+#apiVersion: v1
+#kind: PersistentVolumeClaim
+#metadata:
+#  name: {{ .Values.schemaVolumeClaim }}
+#spec:
+#  accessModes:
+#    - ReadWriteMany  # This is an example; use the appropriate access mode for your use case
+#  storageClassName: nfs  # Specify the storage class here
+#  resources:
+#    requests:
+#      storage: 1Gi  # Specify the size of the volume
+#

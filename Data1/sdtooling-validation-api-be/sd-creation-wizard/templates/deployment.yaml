@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app: sd-api-validation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sd-api-validation
+  template:
+    metadata:
+      labels:
+        app: sd-api-validation
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # fixing fortify issue 'Kubernetes Misconfiguration: Service Account Token Automounted'
+      automountServiceAccountToken: false
+      
+      # fixing fortify issue 'Kubernetes Misconfiguration: Improper Deployment Access Control'
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+          
+      serviceAccountName: {{ if .Values.serviceAccount }}{{ .Values.serviceAccount.name | default .Release.Name }}{{ else }}{{ .Release.Name }}{{ end }}
+      
+      volumes:
+        - name: {{ .Release.Name }}-configmap
+          configMap:
+            name: {{ .Release.Name }}-configmap
+      
+      containers:
+        - name: {{ .Chart.Name }}-api-validation
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+          
+          volumeMounts:
+            - name: {{ .Release.Name }}-configmap
+              mountPath: /config
+          
+          env:
+            - name: LOGGING_CONFIG
+              value: {{ .Values.log4j.config | quote }}
+            
+            - name: OPENAPI_CONFIG_SERVERS
+              value: {{ .Values.openapiConfig.servers | quote }}
+
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.openTelemetry.otlpExporter.endpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ .Values.openTelemetry.otlpExporter.protocol | quote }}
+            - name: OTEL_PROPAGATORS
+              value: {{ .Values.openTelemetry.propagators | quote }}
+            - name: OTEL_RESOURCE_ATTRIBUTES_DEPLOYMENT_ENVIRONMENT
+              value: {{ .Values.openTelemetry.environment | quote }}
+            - name: OTEL_SDK_DISABLED
+              value: {{ .Values.openTelemetry.disabled | quote }}
+
+          resources: {{ toYaml .Values.resources | nindent 12 }}
+
+          {{- with .Values.startupProbe }}
+          startupProbe:
+{{ toYaml . | nindent 12 }}
+          {{- end }}
+
+          livenessProbe:
+{{ toYaml .Values.livenessProbe | nindent 12 }}
+
+          readinessProbe:
+{{ toYaml .Values.readinessProbe | nindent 12 }}

@@ -1,0 +1,134 @@
+# ==============================================================================
+# Observabilidad Prometheus del agente — valores por defecto (participante)
+# ==============================================================================
+# Documento de origen: alertas_críticas_edval.txt
+#
+# Chart espejo del que ya funciona en governance-authority-simpl, con los valores
+# del participante: aquí NO hay clearing-house (vive en la authority) ni Neo4j,
+# pero SÍ hay pg-cluster propio (Patroni), que allí no existe.
+
+nameOverride: ""
+
+imagePullSecrets:
+  - name: github-registry-secret
+
+nodeSelector: {}
+
+# ------------------------------------------------------------------------------
+# Etiquetas de DESCUBRIMIENTO del Prometheus Operator EXTERNO
+# ------------------------------------------------------------------------------
+# El Operator solo hace caso a los objetos que casan con su serviceMonitorSelector /
+# podMonitorSelector / probeSelector.
+#
+# VERIFICADO en vc-c1-prod (2026-08-13): el PrometheusAgent tiene esos tres selectores
+# en `{}`, es decir, recoge objetos de CUALQUIER namespace sin filtrar por etiqueta.
+# Se mantienen igualmente por dos motivos: dejan trazable de quién es cada objeto, y
+# si algún día el agente pasa a filtrar, corregirlo es UNA línea y no una por objeto.
+#   kubectl get prometheusagent -A -o yaml | grep -A3 -E "MonitorSelector|probeSelector"
+discoveryLabels:
+  release: kube-prometheus-stack
+
+# ------------------------------------------------------------------------------
+# blackbox-exporter (grupo G1)
+# ------------------------------------------------------------------------------
+# Sondea las URLs públicas DESDE FUERA, como las ve un usuario. No necesita que
+# ninguna imagen se recompile, por eso es lo que más cobertura da por menos esfuerzo
+# — y hoy es lo ÚNICO que cubre al participante, cuyos servicios no publican métricas
+# (les falta micrometer-registry-prometheus; ver MONITORIZACION-PENDIENTE.md).
+#
+# El blackbox de la authority NO sirve: sus 20 targets son todos de prodauth. Cada
+# namespace necesita el suyo, porque el Probe apunta a un prober del propio namespace.
+#
+# on-prem: imagen ya espejada en Harbor, con digest verificado contra el origen.
+#    Origen: quay.io/prometheus/blackbox-exporter:v0.28.0
+blackbox:
+  enabled: true
+  replicaCount: 1
+  nameOverride: ""
+  image:
+    registry: ghcr.io/cnie-es
+    repository: prometheus/blackbox-exporter
+    tag: v0.28.0
+    pullPolicy: IfNotPresent
+  port: 9115
+  timeout: 5s
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+
+# ------------------------------------------------------------------------------
+# Probes: qué sondea el blackbox
+# ------------------------------------------------------------------------------
+probes:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  # Autodescubrimiento: se sondea TODO Ingress del namespace (6 hoy en cada
+  # participante). Uno nuevo queda vigilado solo, sin tocar este chart.
+  ingressDiscovery:
+    enabled: true
+    module: http_2xx
+    selector: {}
+  # Sin destinos internos: el clearing-house vive en la authority, no aquí.
+  internal:
+    module: http_2xx
+    targets: []
+
+# ------------------------------------------------------------------------------
+# PodMonitors (componentes con métricas nativas en un puerto fuera del Service)
+# ------------------------------------------------------------------------------
+# Patroni (Zalando Spilo) sirve /metrics en :8008, un puerto que el Service del
+# operator NO publica: por eso PodMonitor y no ServiceMonitor.
+#
+# VERIFICADO en prodisbl (2026-08-13): las labels son las de abajo y
+# `curl localhost:8008/metrics` devuelve 200 con las series patroni_*.
+podMonitors:
+  enabled: true
+  interval: 30s
+  targets:
+    - name: pg-cluster
+      selectorLabels:
+        application: spilo
+        cluster-name: pg-cluster
+      targetPort: 8008
+      path: /metrics
+
+# ------------------------------------------------------------------------------
+# Reglas de alerta
+# ------------------------------------------------------------------------------
+# Solo se encienden las que tienen dato real en este agente. El resto está en
+# MONITORIZACION-PENDIENTE.md con su PromQL listo.
+alerts:
+  enabled: true
+
+  frontales:                 # G1 — FrontalNoResponde / FrontalCodigoError
+    enabled: true
+    for: 2m
+
+  clearingHouse:             # G5 — vive en la authority, no en el participante
+    enabled: false
+    for: 2m
+
+  # G8 — RedisCaido. Requiere el exporter sidecar del chart Bitnami: hoy el pod de
+  # redis tiene UN solo contenedor, sin exporter, asi que no hay serie redis_up.
+  # Se enciende junto con `redis.metrics.enabled: true` en app-values/Redis.
+  redis:
+    enabled: true
+    for: 2m
+
+  neo4j:                     # G8 — solo authority (subchart de fc-service)
+    enabled: false
+    for: 2m
+    service: ""
+
+  # G8 — PostgresSinReplica. El participante SI tiene pg-cluster propio.
+  # NOTA: el documento propone `patroni_cluster_members`, que Patroni NO publica —
+  # comprobado contra :8008, 0 ocurrencias. Se usa `patroni_postgres_running`, un
+  # gauge por miembro, que si existe.
+  patroni:
+    enabled: true
+    minMembers: 3
+    for: 5m

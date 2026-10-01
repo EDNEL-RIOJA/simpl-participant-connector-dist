@@ -1,0 +1,17 @@
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: provisioner-secrets
+spec:
+  provider:
+    vault:
+      server: {{.Values.vaultServer}}
+      path: "secret"
+      version: "v2"
+      auth:
+        kubernetes:
+          mountPath: "kubernetes"
+          role: "eso-role"
+          serviceAccountRef:
+            name: eso
+            namespace: {{ .Release.Namespace }}

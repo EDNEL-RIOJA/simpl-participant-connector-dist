@@ -1,0 +1,19 @@
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: decommission-deferred
+  namespace: {{ .Release.Namespace }}
+spec:
+  eventBusName: provisioner-eventbus
+  service:
+    ports:
+      - port: 12000
+        targetPort: 12000
+    metadata:
+      labels:
+        provisioner: eventsource-decommission-deferred
+  webhook:
+    dataRepo:
+      port: "12000"
+      endpoint: /data-repo
+      method: POST

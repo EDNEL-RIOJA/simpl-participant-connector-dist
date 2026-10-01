@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-observer
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-observer
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-observer
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        seccompProfile:
+          type: "RuntimeDefault"
+      serviceAccountName: observer
+      containers:
+        - name: main
+          image: {{ .Values.observerImage }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KAFKA_ADDRESS
+              value: {{ .Values.kafkaEndpoint }}
+            - name: KAFKA_USERNAME
+              value: {{ .Values.secrets.kafka.username }}
+            - name: KAFKA_PASSWORD
+              value: {{ .Values.secrets.kafka.password }}
+            - name: KAFKA_AUTH_ENABLE
+              value: "{{ .Values.kafkaAuthEnable }}"
+            - name: KAFKA_AUTH_MECHANISM
+              value: {{ .Values.kafkaAuthMechanism }}
+            - name: KAFKA_PROVISIONING_RESPONSES_TOPIC_NAME
+              value: {{ .Values.kafkaProvisioningResponsesTopicName }}
+            - name: KAFKA_DECOMMISSIONING_RESPONSES_TOPIC_NAME
+              value: {{ .Values.kafkaDecommissioningResponsesTopicName }}
+            - name: NAMESPACE_TF
+              value: {{ .Release.Namespace }}
+            - name: NAMESPACE_WORKFLOW
+              value: {{ .Release.Namespace }}
+            - name: NAMESPACE_APPLICATION
+              value: {{ .Release.Namespace }}
+            - name: NAMESPACE_ESO
+              value: {{ .Release.Namespace }}
+            - name: WEBHOOK_DEFERRED_DECOMMISSION
+              value: http://decommission-deferred-eventsource-svc.{{ .Release.Namespace }}.svc.cluster.local:12000/data-repo
+            - name: WEBHOOK_EXTERNAL_SECRET
+              value: http://workflow-provision.{{ .Release.Namespace }}.svc.cluster.local:12100/workflow-webhook/provision-ensure-external-secret
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"

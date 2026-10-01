@@ -1,0 +1,50 @@
+image:
+  repository: ghcr.io/cnie-es/redis
+  tag: 7.2
+
+replica:
+  replicaCount: 0
+master:
+  serviceAccount: 
+    create: true
+    name: redis-master-service-account
+  automountServiceAccountToken: true
+  livenessProbe: 
+    enabled: false
+  readinessProbe:
+    enabled: false
+architecture: standalone
+
+secretAnnotations:
+  vault.security.banzaicloud.io/vault-path: "kubernetes"
+  vault.security.banzaicloud.io/vault-skip-verify: "true"
+
+auth:
+  existingSecret: redis-secrets
+  existingSecretPasswordKey: redis
+# Exporter de metricas (sidecar del chart Bitnami). Publica la serie `redis_up`, que es
+# la fuente de la alerta critica RedisCaido (G8 de alertas_críticas_edval.txt).
+#
+# Sin esto el pod de redis corre con UN solo contenedor y no hay ninguna serie que
+# consultar: la alerta existe pero no puede dispararse nunca.
+#
+# La imagen ya esta espejada en Harbor (metrics.image del subchart apunta a
+# ghcr.io/cnie-es/redis-exporter), asi que no hace falta tocar nada mas.
+metrics:
+  enabled: true
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+  # IMPRESCINDIBLE junto a metrics.enabled: sin esto el exporter publica al vacio,
+  # porque nadie lo scrapea. Son dos interruptores distintos del subchart.
+  serviceMonitor:
+    enabled: true
+    # Mismas etiquetas de descubrimiento que el resto de objetos del espacio de datos.
+    # Verificado en vc-c1-prod: el PrometheusAgent tiene los selectores en {} y recoge
+    # de cualquier namespace, asi que hoy la etiqueta no condiciona nada, pero deja
+    # trazable de quien es el objeto.
+    additionalLabels:
+      release: kube-prometheus-stack

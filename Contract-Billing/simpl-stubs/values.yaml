@@ -1,0 +1,26 @@
+deployment:
+  image:
+    artifact: ghcr.io/cnie-es/contract-billing-stubs
+    # c1: 2.0.2 no está en Harbor (solo 2.1.0, el tag alineado con imagesTags.stubs y con aibd2).
+    tag: 2.1.0
+    pullPolicy: Always
+  replicas: 1
+  otel:
+    endpoint: "http://collector.common01.dev.simpl-europe.eu/"
+
+environment: default
+resources:
+  requests:
+    memory: "300Mi"
+    cpu: "150m"
+  limits:
+    memory: "700Mi"
+    cpu: "300m"
+
+probe:
+  endpoint: "/actuator/health"
+  scheme: HTTP
+  port: 8080
+
+imagePullSecrets:
+  - name: github-registry-secret

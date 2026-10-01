@@ -1,0 +1,4 @@
+apiVersion: v2
+appVersion: 2.1.2
+name: infrastructure-crossplane
+version: 2.1.2

@@ -1,0 +1,32 @@
+global:
+  imagePullSecrets:
+    - name: github-registry-secret
+
+injector:
+  replicas: 2
+  enabled: true
+  leaderElector:
+    enabled: true
+  image:
+    registry: ghcr.io
+    repository: cnie-es/openbao/vault-k8s
+    tag: "1.7.2"
+  agentImage:
+    registry: ghcr.io
+    repository: cnie-es/openbao
+    tag: "2.4.3"
+
+server:
+  image:
+    registry: ghcr.io
+    repository: cnie-es/openbao/openbao
+    tag: "2.5.1"
+  initContainers:
+    - name: final-step
+      image: ghcr.io/cnie-es/library-busybox:1.37.0
+  ingress:
+    ingressClassName: apisix
+    enabled: true
+    pathType: Prefix
+    tls:
+      - secretName: wildcard-tls

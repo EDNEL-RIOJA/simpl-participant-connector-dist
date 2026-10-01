@@ -1,0 +1,137 @@
+apiVersion: "acid.zalan.do/v1"
+kind: postgresql
+metadata:
+  name: {{ .Values.name }}
+spec:
+  teamId: "acid"
+  dockerImage: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}
+  volume:
+    size: {{ .Values.volumeSize }}
+    {{- if .Values.storageClass }}
+    storageClass: {{ .Values.storageClass }}
+    {{- end }}
+  numberOfInstances: {{ .Values.instances }}
+  resources:
+    {{- toYaml $.Values.resources | nindent 4 }}
+  users:
+    # database owner
+    postgres:
+    - superuser
+    - createdb
+    {{- range .Values.authorityList }}
+    {{- $db := . | replace "-" "_" }}
+    {{ $db }}_drupal:
+    - superuser
+    - createdb
+    {{ $db }}_keycloak:
+    - superuser
+    - createdb
+    {{ $db }}_ejbca:
+    - superuser
+    - createdb
+    {{ $db }}_securityattributesprovider:
+    - superuser
+    - createdb
+    {{ $db }}_usersroles:
+    - superuser
+    - createdb
+    {{ $db }}_onboarding:
+    - superuser
+    - createdb
+    {{ $db }}_identityprovider:
+    - superuser
+    - createdb
+    {{ $db }}_authenticationprovider:
+    - superuser
+    - createdb
+    {{ $db }}_fcservice:
+    - superuser
+    - createdb
+    {{ $db }}_onlyoffice:
+    - superuser
+    - createdb
+    {{ $db }}_gnoss_acid:
+    - superuser
+    - createdb
+    {{- end }}
+    {{- range .Values.consumerList }}
+    {{- $db := . | replace "-" "_" }}
+    {{ $db }}_keycloak:
+    - superuser
+    - createdb
+    {{ $db }}_usersroles:
+    - superuser
+    - createdb
+    {{ $db }}_authenticationprovider:
+    - superuser
+    - createdb
+    {{ $db }}_edc:
+    - superuser
+    - createdb
+    {{ $db }}_contract:
+    - superuser
+    - createdb
+    {{- end }}
+    {{- range .Values.providerList }}
+    {{- $db := . | replace "-" "_" }}
+    {{ $db }}_keycloak:
+    - superuser
+    - createdb
+    {{ $db }}_usersroles:
+    - superuser
+    - createdb
+    {{ $db }}_authenticationprovider:
+    - superuser
+    - createdb
+    {{ $db }}_edc:
+    - superuser
+    - createdb
+    {{ $db }}_contract:
+    - superuser
+    - createdb
+    {{ $db }}_infrabe:
+    - superuser
+    - createdb
+    {{ $db }}_dagster:
+    - superuser
+    - createdb
+    {{- end }}
+  #databases: name->owner
+  databases:
+    {{- range .Values.authorityList }}
+    {{- $db := . | replace "-" "_" }}
+    {{ $db }}_keycloak: {{ $db }}_keycloak
+    {{ $db }}_ejbca: {{ $db }}_ejbca
+    {{ $db }}_securityattributesprovider: {{ $db }}_securityattributesprovider
+    {{ $db }}_usersroles: {{ $db }}_usersroles
+    {{ $db }}_drupal: {{ $db }}_drupal
+    {{ $db }}_onboarding: {{ $db }}_onboarding
+    {{ $db }}_identityprovider: {{ $db }}_identityprovider
+    {{ $db }}_authenticationprovider: {{ $db }}_authenticationprovider
+    {{ $db }}_fcservice: {{ $db }}_fcservice
+    {{ $db }}_onlyoffice: {{ $db }}_onlyoffice
+    {{ $db }}_gnoss_acid: {{ $db }}_gnoss_acid
+    {{- end }}
+    {{- range .Values.consumerList }}
+    {{- $db := . | replace "-" "_" }}
+    {{ $db }}_keycloak: {{ $db }}_keycloak
+    {{ $db }}_usersroles: {{ $db }}_usersroles
+    {{ $db }}_authenticationprovider: {{ $db }}_authenticationprovider
+    {{ $db }}_edc: {{ $db }}_edc
+    {{ $db }}_contract: {{ $db }}_contract
+    {{- end }}
+    {{- range .Values.providerList }}
+    {{- $db := . | replace "-" "_" }}
+    {{ $db }}_keycloak: {{ $db }}_keycloak
+    {{ $db }}_usersroles: {{ $db }}_usersroles
+    {{ $db }}_authenticationprovider: {{ $db }}_authenticationprovider
+    {{ $db }}_edc: {{ $db }}_edc
+    {{ $db }}_contract: {{ $db }}_contract
+    {{ $db }}_infrabe: {{ $db }}_infrabe
+    {{ $db }}_dagster: {{ $db }}_dagster
+    {{- end }}
+    postgres: postgres
+  postgresql:
+    version: "17"
+    parameters:
+      max_connections: "{{ .Values.maxConnections }}"

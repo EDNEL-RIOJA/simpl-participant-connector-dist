@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: decommission
+  namespace: {{ .Release.Namespace }}
+spec:
+  eventBusName: provisioner-eventbus
+  kafka:
+    decommissionRequest:
+      url: {{ .Values.kafkaEndpoint }}
+      topic: {{ .Values.kafkaDecommissioningRequestsTopicName }}
+      jsonBody: false
+      partition: "0"
+      {{- if .Values.kafkaAuthEnable }}
+      sasl:
+        mechanism: {{ .Values.kafkaAuthMechanism }}
+        userSecret:
+          name: kafka-secret
+          key: username
+        passwordSecret:
+          name: kafka-secret
+          key: password
+      {{- end }}
+      connectionBackoff:
+        duration: 10s
+        steps: 3
+        factor: 1
+        jitter: 0.2

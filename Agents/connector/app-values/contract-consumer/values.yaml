@@ -1,0 +1,24 @@
+deployment:
+  # Repo/nombre de la imagen del contract (override del subchart). El tag se inyecta
+  # desde imagesTags.contract (master values) via application.yaml -> deployment.image.tag.
+  image:
+    artifact: ghcr.io/cnie-es/contract
+  replicas: 1
+  mode: CONSUMER
+  kafka:
+    securityProtocol: SASL_PLAINTEXT
+    sasl:
+      mechanism: PLAIN
+  urls:
+    stubs: 'http://simpl-stubs:8080'
+    # Conector EDC HIBRIDO unico (api :19191); antes, instancia consumer dedicada (29xxx).
+    edc: 'http://simpl-edc-service:19191/api'
+
+environment: default
+resources:
+  requests:
+    memory: "700Mi"
+    cpu: "300m"
+  limits:
+    memory: "700Mi"
+    cpu: "300m"

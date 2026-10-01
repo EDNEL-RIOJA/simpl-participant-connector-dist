@@ -1,0 +1,155 @@
+{{- if .Values.embeddedCommon.enabled }}
+# Common embebido en el conector: servidor OpenBao (Shamir) + openbao-init.
+# Portado de common_components/charts/templates/application-openbao.yaml.
+# Se activa solo con embeddedCommon.enabled=true (participante externo autocontenido).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.cluster.namespace }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: "{{ .Values.argocd.appname }}-openbao"
+  namespace: {{ .Values.argocd.namespace }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - ApplyOutOfSyncOnly=true
+      - CreateNamespace=true
+      - ServerSideApply=true
+  ignoreDifferences:
+  - kind: Secret
+    name: redis-secrets
+    namespace: {{ .Values.cluster.namespace }}
+    jsonPointers:
+      - /data
+  - kind: Secret
+    name: kafka-users-secret
+    jsonPointers:
+      - /data
+  - kind: Secret
+    name: keycloak-secrets
+    jsonPointers:
+      - /data
+  project: {{ .Values.project }}
+  destination:
+    server: {{ .Values.cluster.address }}
+    namespace: "{{ .Values.cluster.namespace }}"
+  sources:
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    ref: values
+  - repoURL: {{ .Values.openbao.repo_URL }}
+    targetRevision: {{ .Values.openbao.targetRevision }}
+    path: {{ .Values.openbao.path }}
+    helm:
+      valueFiles:
+        {{- range .Values.openbao.valueFiles }}
+        - $values/Agents/connector/app-values/openbao/{{ . }}
+        {{- end }}
+      values: |
+        fullnameOverride: openbao-{{ .Release.Namespace }}
+        injector:
+          agentImage:
+            registry: ghcr.io
+            repository: cnie-es/openbao
+            tag: "2.4.3"
+          # El vault-agent inyectado resuelve el servidor por el Service normal por
+          # defecto, que durante el unseal no tiene endpoints listos (timeout). El
+          # chart publico ya trae el Service headless de cluster (`-internal`,
+          # puerto 8201) pensado para esto -- no hace falta forkear el chart.
+          externalVaultAddr: "http://openbao-{{ .Release.Namespace }}-internal.{{ .Values.cluster.namespace }}.svc:8201"
+          {{- if .Values.nodeSelector }}
+          nodeSelector: {{- toYaml .Values.nodeSelector | nindent 12 }}
+          {{- end }}
+          webhook:
+            namespaceSelector:
+              matchExpressions:
+                - key: kubernetes.io/metadata.name
+                  operator: In
+                  values:
+                    - {{ .Values.cluster.namespace }}
+        server:
+          {{- if .Values.openbao.storageClassName }}
+          dataStorage:
+            storageClass: {{ .Values.openbao.storageClassName }}
+          {{- end }}
+          {{- if .Values.nodeSelector }}
+          nodeSelector: {{- toYaml .Values.nodeSelector | nindent 12 }}
+          {{- end }}
+          ingress:
+            hosts:
+              - host: secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+            tls:
+              - secretName: {{ (.Values.tls).secretName | default "wildcard-tls" }}
+                hosts:
+                  - secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+          # Shamir seal (default); unseal handled by openbao-init job + watchdog
+          serviceAccount:
+            create: true
+            name: openbao
+          volumes:
+            - name: wildcard-tls
+              secret:
+                secretName: {{ (.Values.tls).secretName | default "wildcard-tls" }}
+          volumeMounts:
+            - mountPath: /vault/tls
+              name: wildcard-tls
+              readOnly: true
+          standalone:
+            config: |
+              ui = true
+              listener "tcp" {
+                tls_disable = 1
+                address = "[::]:8200"
+                cluster_address = "[::]:8201"
+              }
+              storage "file" {
+                path = "/openbao/data"
+              }
+          ha:
+            enabled: false
+          securityContext:
+            fsGroup: 1000
+            fsGroupChangePolicy: "OnRootMismatch"
+        {{- if .Values.openbao.resources }}
+        resources: {{- toYaml .Values.openbao.resources | nindent 10 }}
+        {{- end }}
+  - repoURL: {{ required "openbao_init.repo_URL es obligatorio con el openbao embebido activo: no hay default porque el anterior apuntaba a un repo obsoleto e inaccesible" .Values.openbao_init.repo_URL }}
+    targetRevision: {{ .Values.openbao_init.targetRevision }}
+    path: {{ .Values.openbao_init.path | default "charts" }}
+    helm:
+      values: |
+        cluster:
+          namespace: {{ .Values.cluster.namespace }}
+        {{- if .Values.openbao_init.storageClassName }}
+        storageClassName: {{ .Values.openbao_init.storageClassName }}
+        {{- end }}
+        namespaceTag: {{ .Values.namespaceTag.common }}
+        domainSuffix: {{ .Values.domainSuffix }}
+        openbaoHost: secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
+        secrets:
+          secretEngine: {{ .Values.secrets.secretEngine }}
+          role: {{ .Values.secrets.role }}
+        agentList:
+          authorities: []
+          consumers: []
+          providers: []
+        # El conector es su propio "common": se siembran las credenciales kafka
+        # para este propio participante (provider).
+        kafkaParticipants:
+          consumers: []
+          providers:
+            - {{ .Values.cluster.namespace }}
+        {{- if .Values.nodeSelector }}
+        nodeSelector: {{- toYaml .Values.nodeSelector | nindent 10 }}
+        {{- end }}
+{{- end }}
