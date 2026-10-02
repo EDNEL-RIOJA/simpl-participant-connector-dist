@@ -92,7 +92,12 @@ spec:
           tag: {{ .Values.vault_webhook.webhookImageTag | quote }}
         vaultEnv:
           repository: "ghcr.io/bank-vaults/vault-env"
-          # Con "v": la etiqueta 1.22.1 no existe en ghcr.io/bank-vaults/vault-env (NotFound).
+          # Con "v": a secas "1.22.1" no existe en ghcr.io/bank-vaults/vault-env (confirmado,
+          # NotFound/ImagePullBackOff). Es el default que usa cualquier componente que NO fije
+          # su propia anotacion vault.security.banzaicloud.io/vault-env-image (la mayoria de los
+          # nuestros si la fijan con "v"; los componentes EDVAL externos, como
+          # edc-connector-adapter, no la traen y caen en este default). Visto en vivo en
+          # extletest/eks-external-rioja.
           tag: "v1.22.1"
         env:
           VAULT_ADDR: "http://openbao-{{ .Values.cluster.namespace }}.{{ .Values.cluster.namespace }}.svc.cluster.local:8200"
