@@ -20,6 +20,18 @@ spec:
       - ApplyOutOfSyncOnly=true
       - CreateNamespace=true
       - ServerSideApply=true
+  ignoreDifferences:
+    # El chart publicado de signer (code.europa.eu/.../signer) hardcodea
+    # command: ["/bin/sh"], args: ["-c", "source ... && cd ... && ./signer"] sin ninguna clave de
+    # values para parametrizarlo -- y "source" no existe en /bin/sh (es builtin de bash), asi que
+    # el contenedor principal crashea con "source: not found". No hay forma de arreglarlo desde
+    # values; se parchea el Deployment a mano (args[1]: "source" -> ". ", POSIX valido) y se
+    # ignora aqui para que selfHeal no lo revierta. Visto en vivo en extletest/eks-external-rioja.
+    - group: apps
+      kind: Deployment
+      name: signer
+      jsonPointers:
+        - /spec/template/spec/containers/0/args
   project: {{ .Values.project }}
   destination:
     server: {{ .Values.cluster.address }}
