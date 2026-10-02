@@ -91,13 +91,12 @@ usePasswordFiles: true
 ## @param image.debug Enable Keycloak image debug mode
 ##
 image:
-  # Imagen oficial del proyecto Keycloak (no la de Bitnami: este chart es propio, solo
-  # reutiliza postgresql/common de Bitnami como subcharts, nunca el chart keycloak en si
-  # -- ver el StatefulSet/Job propios en templates/). La nota de regresion
-  # bitnami/containers#86091 (26.3.3 solo como r0) era especifica del empaquetado de
-  # Bitnami y ya no aplica aqui; 26.3.2 esta confirmado disponible en quay.io/keycloak.
-  registry: quay.io
-  repository: keycloak/keycloak
+  # La imagen de Bitnami (en bitnamilegacy desde que Bitnami retiro su catalogo publico). Las
+  # plantillas son las del chart de Bitnami: los initContainers cargan /opt/bitnami/scripts y
+  # copian /opt/bitnami/keycloak/*, que en la imagen oficial de quay.io/keycloak no existen
+  # (prepare-write-dirs falla con "liblog.sh: No such file or directory").
+  registry: docker.io
+  repository: bitnamilegacy/keycloak
   tag: "26.3.2"
   digest: ""
   ## Specify a imagePullPolicy
