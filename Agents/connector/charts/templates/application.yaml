@@ -29,7 +29,10 @@ spec:
     targetRevision: {{ .Values.values.branch }}
     ref: values
   # Redis
-  - repoURL: oci://registry-1.docker.io/bitnamicharts
+  # Sin oci://: con el prefijo, ArgoCD 3.x lo trata como artefacto OCI nativo, ignora `chart` y
+  # pide .../bitnamicharts/manifests/<version> (401 de Docker Hub). Asi va por Helm OCI y
+  # necesita el repositorio registry-1.docker.io/bitnamicharts dado de alta con enableOCI.
+  - repoURL: registry-1.docker.io/bitnamicharts
     targetRevision: 19.6.0
     chart: redis
     helm:
