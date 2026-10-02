@@ -505,7 +505,7 @@ spec:
         {{- end }}
       values: |
         image:
-          repository: "ghcr.io/ednel-rioja/k8s-images/contract-consumption-be"
+          repository: "ghcr.io/ednel-rioja/k8s-images/data1-contract-consumption-be"
           tag: {{ .Values.imagesTags.contractConsumptionBe | quote }}
         domain: {{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
         {{- if eq .Values.resourcePreset "low" }}
@@ -1264,7 +1264,7 @@ spec:
         {{- end }}
       values: |
         image:
-          repository: "ghcr.io/ednel-rioja/k8s-images/edcconnectoradapter"
+          repository: "ghcr.io/ednel-rioja/k8s-images/data1-edcconnectoradapter"
           tag: {{ .Values.imagesTags.edcConnectorAdapter | quote }}
         domain: {{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
         ingress:
@@ -1308,7 +1308,7 @@ spec:
         {{- end }}
       values: |
         image:
-          repository: "ghcr.io/ednel-rioja/k8s-images/edcconnectoradapter"
+          repository: "ghcr.io/ednel-rioja/k8s-images/data1-edcconnectoradapter"
           tag: {{ .Values.imagesTags.edcConnectorAdapter | quote }}
         ingress:
           clusterIssuer: {{ .Values.cluster.issuer }}
@@ -1443,7 +1443,7 @@ spec:
           vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
         deployment:
           image:
-            artifact: "ghcr.io/ednel-rioja/k8s-images/contract"
+            artifact: "ghcr.io/ednel-rioja/k8s-images/contract-billing-contract"
             tag: {{ .Values.imagesTags.contract }}
           db:
             url: "jdbc:postgresql://pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local:5432/{{ .Values.cluster.namespace }}_contract"
@@ -1503,7 +1503,7 @@ spec:
           vault.security.banzaicloud.io/vault-env-image: "ghcr.io/bank-vaults/vault-env:v1.22.1"
         deployment:
           image:
-            artifact: "ghcr.io/ednel-rioja/k8s-images/contract"
+            artifact: "ghcr.io/ednel-rioja/k8s-images/contract-billing-contract"
             tag: {{ .Values.imagesTags.contract }}
           db:
             url: "jdbc:postgresql://pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local:5432/{{ .Values.cluster.namespace }}_contract_consumer"
