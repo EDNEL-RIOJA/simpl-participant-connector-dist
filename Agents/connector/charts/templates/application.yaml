@@ -614,14 +614,16 @@ spec:
           frontendDomain: signer-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
           annotations:
             cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
-        hashicorp:
-          {{- with include "connector.vaultCaSecret" $ }}
-          tlsSecret: {{ . }}
-          {{- end }}
-          service: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
+        # El chart (code.europa.eu/.../signer) NO lee hashicorp.*/secretEngine/secretConfigPath
+        # (esas claves no existen en su schema) -- las ignora en silencio y su init container
+        # cae al default hardcodeado del chart (un Vault de sandbox de SIMPL-open ajeno,
+        # sandbox-cat-dat, "namespace not authorized"). Claves reales confirmadas en su
+        # values.yaml publicado: vault.address/role/secretPath. Visto en vivo en
+        # extletest/eks-external-rioja.
+        vault:
+          address: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
           role: {{ .Values.secrets.role }}
-        secretEngine: {{ .Values.secrets.secretEngine }}
-        secretConfigPath: "{{ .Values.secrets.secretEngine }}/{{ .Values.cluster.namespace }}-infra-adapter-simpl-backend"
+          secretPath: "/v1/{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-infra-adapter-simpl-backend"
   {{- end }}
   {{- if .Values.simpl_catalogue_client.enabled }}
   # Simpl Catalogue Client
