@@ -94,3 +94,16 @@ los clientes cada vez que un render se quede sin acceso al cluster.
 sin-lookup
 {{- end -}}
 {{- end -}}
+
+{{/*
+Secret TLS del ingress de OpenBao (secrets-<common>.<dominio interno>).
+  - tls.perHost: true   -> secrets-<common>-tls, que emite cert-manager con cluster.issuer.
+  - si no               -> tls.secretName o, en su defecto, el wildcard "wildcard-tls" de siempre.
+*/}}
+{{- define "connector.openbaoTlsSecret" -}}
+{{- if (.Values.tls).perHost -}}
+{{- printf "secrets-%s-tls" .Values.namespaceTag.common -}}
+{{- else -}}
+{{- (.Values.tls).secretName | default "wildcard-tls" -}}
+{{- end -}}
+{{- end -}}

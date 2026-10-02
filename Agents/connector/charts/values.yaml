@@ -53,6 +53,12 @@ secrets:
 embeddedCommon:
   enabled: false
 wildcardTlsExternal: false
+# TLS per-host con cert-manager (p. ej. Let's Encrypt via cluster.issuer) en los ingress que por
+# defecto esperan un wildcard: OpenBao embebido, catalogue-ui, sd-ui y data-dashboard. Con true,
+# cada uno pide su certificado <host>-tls con la anotacion cert-manager.io/cluster-issuer.
+# Requiere que wildcardTlsSecretName este vacio. Con false (defecto) no cambia nada.
+tls:
+  perHost: false
 lbNetwork: public
 caTrust:
   enabled: false

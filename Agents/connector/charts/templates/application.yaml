@@ -586,9 +586,11 @@ spec:
           className: apisix
           annotations:
             kubernetes.io/ingress.class: apisix
-            {{- if and (not .Values.embeddedCommon.enabled) (not .Values.wildcardTlsExternal) }}
+            {{- if or (.Values.tls).perHost (and (not .Values.embeddedCommon.enabled) (not .Values.wildcardTlsExternal)) }}
             cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+            {{- if not (.Values.tls).perHost }}
             acme.cert-manager.io/http01-edit-in-place: "true"
+            {{- end }}
             {{- end }}
             k8s.apisix.apache.org/proxy-body-size: 5m
             k8s.apisix.apache.org/proxy-buffering: "on"
@@ -599,7 +601,7 @@ spec:
               - path: /*
                 pathType: ImplementationSpecific
           tls:
-            - secretName: {{ .Values.wildcardTlsSecretName | default (printf "catalogue-ui-%s-tls" .Values.namespaceTag.dataprovider) }}
+            - secretName: {{ if (.Values.tls).perHost }}{{ printf "catalogue-ui-%s-tls" .Values.namespaceTag.dataprovider }}{{ else }}{{ .Values.wildcardTlsSecretName | default (printf "catalogue-ui-%s-tls" .Values.namespaceTag.dataprovider) }}{{ end }}
               hosts:
                 - catalogue-ui-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
         {{- if eq .Values.resourcePreset "low" }}
@@ -1058,9 +1060,11 @@ spec:
           className: apisix
           annotations:
             kubernetes.io/ingress.class: apisix
-            {{- if and (not .Values.embeddedCommon.enabled) (not .Values.wildcardTlsExternal) }}
+            {{- if or (.Values.tls).perHost (and (not .Values.embeddedCommon.enabled) (not .Values.wildcardTlsExternal)) }}
             cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+            {{- if not (.Values.tls).perHost }}
             acme.cert-manager.io/http01-edit-in-place: "true"
+            {{- end }}
             {{- end }}
             k8s.apisix.apache.org/proxy-body-size: 5m
             k8s.apisix.apache.org/proxy-buffering: "on"
@@ -1071,7 +1075,7 @@ spec:
               - path: /*
                 pathType: ImplementationSpecific
           tls:
-            - secretName: {{ .Values.wildcardTlsSecretName | default (printf "sd-ui-%s-tls" .Values.namespaceTag.dataprovider) }}
+            - secretName: {{ if (.Values.tls).perHost }}{{ printf "sd-ui-%s-tls" .Values.namespaceTag.dataprovider }}{{ else }}{{ .Values.wildcardTlsSecretName | default (printf "sd-ui-%s-tls" .Values.namespaceTag.dataprovider) }}{{ end }}
               hosts:
                 - sd-ui-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
         env:
@@ -1109,9 +1113,11 @@ spec:
           className: apisix
           annotations:
             kubernetes.io/ingress.class: apisix
-            {{- if and (not .Values.embeddedCommon.enabled) (not .Values.wildcardTlsExternal) }}
+            {{- if or (.Values.tls).perHost (and (not .Values.embeddedCommon.enabled) (not .Values.wildcardTlsExternal)) }}
             cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+            {{- if not (.Values.tls).perHost }}
             acme.cert-manager.io/http01-edit-in-place: "true"
+            {{- end }}
             {{- end }}
             k8s.apisix.apache.org/proxy-body-size: "5m"
             k8s.apisix.apache.org/proxy-buffer-size: "8k"
@@ -1122,7 +1128,7 @@ spec:
                 - path: /
                   pathType: Prefix
           tls:
-            - secretName: {{ .Values.wildcardTlsSecretName | default (printf "data-dashboard-%s-tls" .Values.namespaceTag.dataprovider) }}
+            - secretName: {{ if (.Values.tls).perHost }}{{ printf "data-dashboard-%s-tls" .Values.namespaceTag.dataprovider }}{{ else }}{{ .Values.wildcardTlsSecretName | default (printf "data-dashboard-%s-tls" .Values.namespaceTag.dataprovider) }}{{ end }}
               hosts:
                 - data-dashboard-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
         config:

@@ -86,24 +86,37 @@ spec:
           nodeSelector: {{- toYaml .Values.nodeSelector | nindent 12 }}
           {{- end }}
           ingress:
+            {{- /* tls.perHost: certificado propio del host, emitido por cert-manager con cluster.issuer. */}}
+            {{- if (.Values.tls).perHost }}
+            annotations:
+              cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
+            {{- end }}
             hosts:
               - host: secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
             tls:
-              - secretName: {{ (.Values.tls).secretName | default "wildcard-tls" }}
+              - secretName: {{ include "connector.openbaoTlsSecret" . }}
                 hosts:
                   - secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}
           # Shamir seal (default); unseal handled by openbao-init job + watchdog
           serviceAccount:
             create: true
             name: openbao
+          {{- /*
+            El listener tiene tls_disable = 1, asi que OpenBao no lee este montaje; se mantiene en
+            modo wildcard para no cambiar el pod de los despliegues que ya existen. Con tls.perHost
+            se omite: montar un Secret que emite cert-manager dejaria el pod esperando a que exista,
+            y el certificado depende a su vez de que el ingress este publicado.
+          */}}
+          {{- if not (.Values.tls).perHost }}
           volumes:
             - name: wildcard-tls
               secret:
-                secretName: {{ (.Values.tls).secretName | default "wildcard-tls" }}
+                secretName: {{ include "connector.openbaoTlsSecret" . }}
           volumeMounts:
             - mountPath: /vault/tls
               name: wildcard-tls
               readOnly: true
+          {{- end }}
           standalone:
             config: |
               ui = true
