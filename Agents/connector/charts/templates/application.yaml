@@ -242,8 +242,9 @@ spec:
         # ("postgresql") y el pod se queda reintentando "cannot resolve host postgresql"
         # para siempre, aunque KC_DB_URL apunte bien a pg-cluster. Visto en vivo en
         # extletest/eks-external-rioja (libkeycloak.sh:299-306, keycloak_initialize()).
-        - name: KEYCLOAK_DATABASE_VENDOR
-          value: "postgresql"
+        # Sin KEYCLOAK_DATABASE_VENDOR: el entrypoint lo pasa tal cual a KC_DB y Keycloak 26 solo
+        # acepta "postgres" ("Invalid value for option 'KC_DB': postgresql"). El vendor ya sale de
+        # KC_DB_URL.
         - name: KEYCLOAK_DATABASE_HOST
           value: "pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local"
         - name: KEYCLOAK_DATABASE_PORT
