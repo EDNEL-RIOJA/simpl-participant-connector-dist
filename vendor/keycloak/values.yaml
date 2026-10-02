@@ -97,7 +97,10 @@ image:
   # (prepare-write-dirs falla con "liblog.sh: No such file or directory").
   registry: docker.io
   repository: bitnamilegacy/keycloak
-  tag: "26.3.2"
+  # -debian-12-r2 y no "26.3.2": ese alias es la build r0 (jul 2025), cuyo entrypoint espera la
+  # BD en KEYCLOAK_DATABASE_HOST (defecto "postgresql") e ignora KC_DB_URL. La r2 es la misma
+  # que corre on-prem (harbor c1-apps/keycloak, digest 7043f871...).
+  tag: "26.3.2-debian-12-r2"
   digest: ""
   ## Specify a imagePullPolicy
   ## ref: https://kubernetes.io/docs/concepts/containers/images/#pre-pulled-images
