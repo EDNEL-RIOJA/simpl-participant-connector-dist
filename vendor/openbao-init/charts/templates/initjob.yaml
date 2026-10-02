@@ -368,6 +368,23 @@ spec:
                     {{ . }}_edcconn="$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32)"
                 fi
                 {{- end }}
+                {{- /*
+                Participante HIBRIDO: solo anade los 3 campos propios de la 2a instancia
+                consumer de cada componente (ver secrets.yaml). Guard en _contract_consumer
+                especificamente (no en _contract, que YA existe para un hibrido via
+                kafkaParticipants.providers) para no regenerar credenciales de provider ya
+                en uso. Visto en vivo en extletest/eks-external-rioja: vault-agent-init de
+                contract-consumer se quedaba esperando para siempre un campo que nunca se
+                sembraba.
+                */}}
+                {{- range (default (list) .Values.kafkaParticipants.hybrids) }}
+                if ! bao kv get -mount={{ $.Values.secrets.secretEngine }} -field="{{ . }}_contract_consumer" {{ $.Values.cluster.namespace }}-kafka-credentials > /dev/null 2>&1; then
+                  bao kv patch -mount={{ $.Values.secrets.secretEngine }} {{ $.Values.cluster.namespace }}-kafka-credentials \
+                    {{ . }}_contract_consumer="$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32)" \
+                    {{ . }}_contract_consumption="$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32)" \
+                    {{ . }}_edcconn="$(cat /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 32)"
+                fi
+                {{- end }}
                 # mailpit seeding moved to step 9-sync-mailpit-secrets so the
                 # bcrypt htpasswd lines are stored in OpenBao (avoids re-hashing
                 # on every reconcile and lets the K8s Secret derive from a
