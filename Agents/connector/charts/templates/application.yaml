@@ -20,30 +20,10 @@ spec:
       - ApplyOutOfSyncOnly=true
       - CreateNamespace=true
       - ServerSideApply=true
-  ignoreDifferences:
-    # El chart publicado de signer (code.europa.eu/.../signer) hardcodea
-    # command: ["/bin/sh"], args: ["-c", "source ... && cd ... && ./signer"] sin ninguna clave de
-    # values para parametrizarlo -- y "source" no existe en /bin/sh (es builtin de bash), asi que
-    # el contenedor principal crashea con "source: not found". No hay forma de arreglarlo desde
-    # values; se parchea el Deployment a mano (args[1]: "source" -> ". ", POSIX valido) y se
-    # ignora aqui para que selfHeal no lo revierta. Visto en vivo en extletest/eks-external-rioja.
-    - group: apps
-      kind: Deployment
-      name: signer
-      jsonPointers:
-        - /spec/template/spec/containers/0/args
-    # Mismo caso que signer: el chart publicado de simpl-files (code.europa.eu/.../simpl-files)
-    # hardcodea los volumes/volumeMounts del Deployment (solo el PVC de documents, de solo
-    # lectura) sin ninguna clave de values para anadir otro. nginx corre como runAsUser: 101 y
-    # no puede escribir /tmp/nginx.pid -> CrashLoopBackOff. Se parchea a mano un emptyDir
-    # montado en /tmp y se ignora aqui para que selfHeal no lo revierta. Visto en vivo en
-    # extletest/eks-external-rioja.
-    - group: apps
-      kind: Deployment
-      name: simpl-files
-      jsonPointers:
-        - /spec/template/spec/volumes
-        - /spec/template/spec/containers/0/volumeMounts
+  {{- /*
+    Sin ignoreDifferences para signer y simpl-files: sus arreglos ('.' en vez de 'source' y el
+    emptyDir de /tmp) estan ahora en sus charts de vendor/, y el estado vivo coincide con git.
+  */}}
   project: {{ .Values.project }}
   destination:
     server: {{ .Values.cluster.address }}
@@ -619,9 +599,10 @@ spec:
   {{- end }}
   {{- if .Values.signer.enabled }}
   # Signer
-  - repoURL: https://code.europa.eu/api/v4/projects/2111/packages/helm/stable
-    targetRevision: 0.1.0
-    chart: signer
+  # Chart en vendor/signer (el publico de code.europa.eu, con el arreglo dentro en vez de un parche en vivo).
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: vendor/signer
     helm:
       valueFiles:
         {{- range .Values.signer.valueFiles }}
@@ -1677,9 +1658,10 @@ spec:
           tag: {{ .Values.imagesTags.stubs }}
   {{- if .Values.files.enabled }}
   # Files
-  - repoURL: https://code.europa.eu/api/v4/projects/978/packages/helm/stable
-    targetRevision: 1.4.0
-    chart: simpl-files
+  # Chart en vendor/simpl-files (el publico de code.europa.eu, con el arreglo dentro en vez de un parche en vivo).
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: vendor/simpl-files
     helm:
       valueFiles:
         {{- range .Values.files.valueFiles }}
