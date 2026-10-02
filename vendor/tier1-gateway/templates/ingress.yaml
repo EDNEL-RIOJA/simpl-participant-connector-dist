@@ -23,7 +23,9 @@ spec:
     - host: {{ tpl .Values.hostT1 . }}
       http:
         paths:
-          - path: /
+          # /* y no /: con pathType ImplementationSpecific el controlador clasico de APISIX toma
+          # el path literal y "/" casa solo con la raiz (todo lo demas, /auth, /cli..., da 404).
+          - path: /*
             pathType: ImplementationSpecific
             backend:
               service:

@@ -23,7 +23,8 @@ spec:
       host: {{ tpl .Values.hostFe . }}
       http:
         paths:
-        - path: "{{ .Values.path }}"
+        # /* final: con ImplementationSpecific APISIX toma el path literal (ver tier1-gateway).
+        - path: "{{ .Values.path }}/*"
           pathType: ImplementationSpecific
           backend:
             service:
