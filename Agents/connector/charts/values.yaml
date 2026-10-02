@@ -50,6 +50,10 @@ secrets:
   role: "${SECRETROLE}"
   tlsSecret: ''
   caBundle: ''
+  # CA de la AUTHORITY contra la que se onboarda (distinta de caBundle, que es la CA de OpenBao).
+  # Vacio por defecto; values-external.yaml la rellena para el perfil externo. Ver
+  # templates/authority-ca-secret.yaml.
+  authorityCaBundle: ''
 embeddedCommon:
   enabled: false
 wildcardTlsExternal: false
