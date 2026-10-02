@@ -2,8 +2,20 @@ image:
   # c1/on-prem: Harbor (este app-values pisa el repository del chart; con registry=harbor del
   # chart, "cnie-es/keycloak" daba harbor.c0.example.invalid/ednel-rioja/k8s-images
   # /keycloak -> proyecto inexistente -> 401). Harbor c1-apps permite pull anónimo.
-  registry: ghcr.io/cnie-es
-  repository: keycloak
+  # ghcr.io/cnie-es/keycloak es privado: un participante externo sin credenciales no puede pullarlo
+  # (bloqueado para toda la publicacion de los 9 EDVAL, ver SEGUIMIENTO-conector-externo.md).
+  # NO usar quay.io/keycloak/keycloak (imagen oficial, no-Bitnami) tampoco: este chart es el de
+  # Bitnami (vendor/keycloak) y su init container "prepare-write-dirs" asume la estructura interna
+  # de Bitnami (/opt/bitnami/scripts/liblog.sh, /opt/bitnami/keycloak/...) — con la oficial falla
+  # con "No such file or directory" (visto en vivo en extletest/eks-external-rioja).
+  # bitnamilegacy es el archivo publico congelado tras el cierre del catalogo gratuito de
+  # Bitnami/Broadcom (mismo patron que redis/redis-exporter en este repo): mismo layout Bitnami,
+  # accesible sin token.
+  registry: docker.io
+  repository: bitnamilegacy/keycloak
+  # Tag explicito (el default del chart, 26.3.2, tambien existe en bitnamilegacy, pero se fija el
+  # exacto ya usado y verificado en el repo historico de EDNEL-RIOJA).
+  tag: "26.3.2-debian-12-r2"
 # Chart 25.2.0: imagePullSecrets y allowInsecureImages se leen bajo global.* (no top-level).
 global:
   # c1/on-prem: SIN imagePullSecrets — Harbor c1-apps es de pull anónimo y el github-registry-secret
