@@ -60,11 +60,16 @@ wildcardTlsExternal: false
 tls:
   perHost: false
 lbNetwork: public
+# Confianza en una CA privada para los servicios Java que hablan con la authority (tier1-gateway,
+# tier2-gateway, authentication-provider-be). Caso tipico: authority on-prem con *.cnie.internal
+# firmado por la CNIE Internal CA. caBundle es el PEM de la CA (y sus intermedias); es publico.
+# Ver templates/ca-truststore.yaml.
 caTrust:
   enabled: false
-  secretName: ''
-  caKey: ca.crt
-  alias: external-ca
+  caBundle: ''
+  # Imagenes del Job que construye el truststore: una JRE (keytool + cacerts) y kubectl.
+  jreImage: docker.io/library/eclipse-temurin:21-jre
+  kubectlImage: docker.io/alpine/kubectl:1.35.2
 agentList:
   authorities: []
   consumers: []
@@ -652,3 +657,10 @@ images:
 chartRevisions:
   contractConsumptionBe: 1.20.2-edval
   edcConnectorAdapter: 1.14.0-edval
+# Ingress publico del data plane del EDC (public-be-<ns>), que el chart cnie-es/simpl-edc no
+# trae. Opt-in para no cambiar los despliegues existentes. Ver templates/edc-public-ingress.yaml.
+edcPublicIngress:
+  enabled: false
+  className: apisix
+  # Puerto publico del Service simpl-edc-service (values-hybrid.yaml: 19291).
+  servicePort: 19291

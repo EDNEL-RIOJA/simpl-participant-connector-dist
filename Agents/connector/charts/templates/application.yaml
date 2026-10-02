@@ -628,11 +628,7 @@ spec:
         {{- end }}
       values: |
         {{- if $.Values.caTrust.enabled }}
-        caTrust:
-          enabled: true
-          secretName: {{ $.Values.caTrust.secretName }}
-          caKey: {{ $.Values.caTrust.caKey }}
-          alias: {{ $.Values.caTrust.alias }}
+        {{- include "connector.javaTrustValues" (dict "root" $ "chart" "tier1-gateway") | nindent 8 }}
         {{- end }}
         hostT1: participant-be-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
         image:
@@ -848,11 +844,7 @@ spec:
         {{- end }}
         {{- end }}
         {{- if $.Values.caTrust.enabled }}
-        caTrust:
-          enabled: true
-          secretName: {{ $.Values.caTrust.secretName }}
-          caKey: {{ $.Values.caTrust.caKey }}
-          alias: {{ $.Values.caTrust.alias }}
+        {{- include "connector.javaTrustValues" (dict "root" $ "chart" "tier2-gateway") | nindent 8 }}
         {{- end }}
         authorityUrlT1: "https://authority-be-{{ .Values.namespaceTag.authority }}.{{ include "connector.authorityDomain" . }}"
         kafkaConfig:
@@ -916,11 +908,7 @@ spec:
         {{- end }}
       values: |
         {{- if $.Values.caTrust.enabled }}
-        caTrust:
-          enabled: true
-          secretName: {{ $.Values.caTrust.secretName }}
-          caKey: {{ $.Values.caTrust.caKey }}
-          alias: {{ $.Values.caTrust.alias }}
+        {{- include "connector.javaTrustValues" (dict "root" $ "chart" "authentication-provider-be") | nindent 8 }}
         {{- end }}
         podAnnotations:
           vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
