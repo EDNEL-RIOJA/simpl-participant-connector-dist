@@ -1266,6 +1266,11 @@ spec:
           edcParticipantId: {{ .Values.cluster.namespace }}
         postgresql:
           username: {{ .Values.cluster.namespace }}_edc
+        # El chart cnie-es/simpl-edc comprueba tls.url.participantIdSource pero el curl de su init
+        # wait-for-participant-id usa tls.participantIdSource: sin esta clave el init llama a curl sin
+        # URL ("no URL specified") y el EDC no arranca nunca.
+        tls:
+          participantIdSource: http://authentication-provider:8080/v1/credentials
         hashicorp:
           {{- with include "connector.vaultCaSecret" $ }}
           tlsSecret: {{ . }}
@@ -1315,6 +1320,11 @@ spec:
           edcParticipantId: {{ .Values.cluster.namespace }}
         postgresql:
           username: {{ .Values.cluster.namespace }}_edc_consumer
+        # El chart cnie-es/simpl-edc comprueba tls.url.participantIdSource pero el curl de su init
+        # wait-for-participant-id usa tls.participantIdSource: sin esta clave el init llama a curl sin
+        # URL ("no URL specified") y el EDC no arranca nunca.
+        tls:
+          participantIdSource: http://authentication-provider:8080/v1/credentials
         hashicorp:
           {{- with include "connector.vaultCaSecret" $ }}
           tlsSecret: {{ . }}

@@ -22,7 +22,9 @@ imagesTags:
   usersRolesFe: 31c0794f07bcbe19d7988829ba93ece21938d597
   sdtoolingApiBe: 1.25.0-edval-v2
   sdtoolingValidationApiBe: 1.20.0
-  simplFiles: 1.2.0
+  # Igual que el chart publico simpl-files 1.4.0 (appVersion 1.4.0). Con la imagen 1.2.0 y el
+  # securityContext de ese chart (runAsUser 101) nginx no puede escribir /tmp/nginx.pid.
+  simplFiles: 1.4.0
   xfscAdvsearch: 1.22.0
   contractConsumptionBe: 1.20.0
   edcConnectorAdapter: '1.15.0'
