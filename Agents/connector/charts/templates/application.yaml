@@ -497,7 +497,7 @@ spec:
   - repoURL: https://github.com/cnie-es/simpl-contract-consumption-be.git
     targetRevision: 1.20.2-edval
     path: charts
-    targetRevision: {{ .Values.values.branch }}
+    targetRevision: {{ .Values.chartRevisions.contractConsumptionBe }}
     helm:
       valueFiles:
         {{- range .Values.contract_consumption_be.valueFiles }}
@@ -616,9 +616,11 @@ spec:
         {{- end }}
   {{- end }}
   # Tier 1 Gateway
-  - repoURL: https://code.europa.eu/api/v4/projects/772/packages/helm/stable
-    targetRevision: 2.16.0-rc.1379
-    chart: tier1-gateway
+  # Chart en vendor/ con ingressClassName apisix: el original lo trae fijo a nginx y en los clusters
+  # del conector solo hay controlador de APISIX.
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: vendor/tier1-gateway
     helm:
       valueFiles:
         {{- range .Values.tier1_gateway.valueFiles }}
@@ -755,9 +757,11 @@ spec:
           {{- end }}
         {{- end }}
   # Users Roles FE
-  - repoURL: https://github.com/cnie-es/simpl-fe-users-and-roles.git
-    targetRevision: ednel-v1.0.2
-    path: charts
+  # Chart en vendor/ con ingressClassName apisix: el original lo trae fijo a nginx y en los clusters
+  # del conector solo hay controlador de APISIX.
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: vendor/fe-users-and-roles
     helm:
       {{- if .Values.users_roles_fe.valueFiles }}
       valueFiles:
@@ -996,9 +1000,11 @@ spec:
           {{- end }}
         {{- end }}
   # Authentication Provider FE
-  - repoURL: https://github.com/cnie-es/simpl-fe-authentication-provider.git
-    targetRevision: ednel-v1.0.2
-    path: charts
+  # Chart en vendor/ con ingressClassName apisix: el original lo trae fijo a nginx y en los clusters
+  # del conector solo hay controlador de APISIX.
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: vendor/fe-authentication-provider
     helm:
       {{- if .Values.auth_provider_fe.valueFiles }}
       valueFiles:
@@ -1095,9 +1101,11 @@ spec:
   {{- end }}
   {{- if .Values.data_dashboard.enabled }}
   # Data Dashboard
-  - repoURL: https://github.com/cnie-es/edc-data-dashboard.git
-    targetRevision: v1.0.5-edval
-    path: charts
+  # cnie-es/edc-data-dashboard es el codigo de la app y no trae chart de Helm; el chart va en
+  # vendor/data-dashboard (copiado de external/data-dashboard de simpl-participant-connector).
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: vendor/data-dashboard
     helm:
       valueFiles:
         {{- range .Values.data_dashboard.valueFiles }}
@@ -1177,6 +1185,7 @@ spec:
         {{- end }}
       values: |
         deployment:
+          image: {{ .Values.images.simplEdc }}
           tag: {{ .Values.imagesTags.simplEdc }}
           host: {{ .Values.simpl_edc.nameOverride }}-service
           callbackAddress: "https://tls-participant-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/edc"
@@ -1225,6 +1234,7 @@ spec:
         {{- end }}
       values: |
         deployment:
+          image: {{ .Values.images.simplEdc }}
           tag: {{ .Values.imagesTags.simplEdc }}
           host: {{ .Values.simpl_edc_consumer.nameOverride }}-service
           callbackAddress: "https://tls-participant-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}/edc"
@@ -1305,7 +1315,7 @@ spec:
   - repoURL: https://github.com/cnie-es/simpl-edc-connector-adapter.git
     targetRevision: 1.14.0-edval
     path: charts
-    targetRevision: {{ .Values.values.branch }}
+    targetRevision: {{ .Values.chartRevisions.edcConnectorAdapter }}
     helm:
       releaseName: {{ .Values.edc_connector_adapter_consumer.nameOverride }}
       valueFiles:
@@ -1586,6 +1596,8 @@ spec:
           registry: ghcr.io/cnie-es
           tag: {{ .Values.imagesTags.simplFiles }}
         ingress:
+          # El chart trae nginx por defecto; aqui el unico controlador es APISIX.
+          ingressClass: apisix
           hostname: files-{{ .Values.namespaceTag.dataprovider }}.{{ .Values.domainSuffix }}
           secretName: files-{{ .Values.namespaceTag.dataprovider }}-tls
           clusterIssuer: {{ .Values.cluster.issuer }}

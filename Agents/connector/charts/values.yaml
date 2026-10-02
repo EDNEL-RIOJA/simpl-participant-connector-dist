@@ -89,7 +89,7 @@ vault_webhook:
   targetRevision: main
   path: deploy/charts/vault-secrets-webhook
   image:
-    registry: ghcr.io/cnie-es
+    registry: docker.io
     repository: openbao/openbao
     tag: 2.5.0
   resources:
@@ -105,7 +105,7 @@ confluent_operator:
   targetRevision: 0.1351.59
   nameOverride: confluent-operator
   image:
-    registry: ghcr.io/cnie-es
+    registry: docker.io
     application: confluentinc/confluent-operator
     tag: 0.1351.59
 kafka:
@@ -115,7 +115,7 @@ kafka:
   targetRevision: v3.1.8-test.11
   chart_name: kafka
   image:
-    registry: ghcr.io/cnie-es
+    registry: docker.io
     application: confluentinc/cp-server
     tag: 8.1.1
     initImage: confluentinc/confluent-init-container
@@ -594,8 +594,8 @@ pg_operator:
   path: charts/postgres-operator
   targetRevision: v1.15.1
   image:
-    registry: ghcr.io/cnie-es
-    repository: zalando-postgres-operator
+    registry: ghcr.io
+    repository: zalando/postgres-operator
     tag: v1.15.1
 pg_cluster:
   repo_URL: https://github.com/cnie-es/edval-conector.git
@@ -604,8 +604,8 @@ pg_cluster:
   volumeSize: 20Gi
   storageClass: ''
   image:
-    registry: ghcr.io/cnie-es
-    repository: spilo-17
+    registry: ghcr.io
+    repository: zalando/spilo-17
     tag: 4.0-p2
   resources:
     requests:
@@ -642,3 +642,13 @@ configFiles:
   realmExportPath: keycloak_realms_config/data-provider-participant-realm-export.json
   themePath: keycloak_themes/keycloak-theme-for-kc-all-other-versions.jar
   authenticatorPath: keycloak_authenticator/keycloak-authenticator-2.2.0.jar
+
+# Imagenes que no se fijan por registry/repository en los values de su subchart.
+images:
+  # ghcr.io/cnie-es ya no publica esta imagen; el espejo de ednel-rioja tiene las mismas tags.
+  simplEdc: ghcr.io/ednel-rioja/k8s-images/gaia-x-edc-simpl-edc
+# Revision de los charts de cnie-es que antes tomaban values.branch (la rama del conector), que en
+# esos repos no existe: solo tienen estos tags.
+chartRevisions:
+  contractConsumptionBe: 1.20.2-edval
+  edcConnectorAdapter: 1.14.0-edval

@@ -59,14 +59,14 @@ spec:
         fullnameOverride: openbao-{{ .Release.Namespace }}
         injector:
           agentImage:
-            registry: ghcr.io
-            repository: cnie-es/openbao
+            registry: docker.io
+            repository: openbao/openbao
             tag: "2.4.3"
-          # El vault-agent inyectado resuelve el servidor por el Service normal por
-          # defecto, que durante el unseal no tiene endpoints listos (timeout). El
-          # chart publico ya trae el Service headless de cluster (`-internal`,
-          # puerto 8201) pensado para esto -- no hace falta forkear el chart.
-          externalVaultAddr: "http://openbao-{{ .Release.Namespace }}-internal.{{ .Values.cluster.namespace }}.svc:8201"
+          {{- /*
+            Sin injector.externalVaultAddr: en openbao-helm ese valor pone el chart en modo
+            "external" (_helpers.tpl, openbao.mode) y entonces NO despliega el servidor, ni su
+            StatefulSet ni su Ingress. El conector se quedaba sin OpenBao.
+          */}}
           {{- if .Values.nodeSelector }}
           nodeSelector: {{- toYaml .Values.nodeSelector | nindent 12 }}
           {{- end }}
