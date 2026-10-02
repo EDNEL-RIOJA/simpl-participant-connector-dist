@@ -42,6 +42,12 @@ spec:
         {{- end }}
       values: |
         fullnameOverride: {{ .Values.redis.nameOverride }}
+        {{- /* El ServiceMonitor que activa app-values/Redis solo si el cluster tiene Prometheus Operator: sin el CRD el sync entero falla. */}}
+        {{- if not (and .Values.observability.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1")) }}
+        metrics:
+          serviceMonitor:
+            enabled: false
+        {{- end }}
         master:
           podAnnotations:
             vault.security.banzaicloud.io/vault-addr: "https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
@@ -1846,7 +1852,13 @@ spec:
             cert-manager.io/cluster-issuer: {{ .Values.cluster.issuer }}
   {{- end }}
 
-  {{- if .Values.observability.enabled }}
+  {{- /*
+    Solo con Prometheus Operator en el cluster (monitoring.coreos.com/v1): el chart crea Probe,
+    PodMonitor y PrometheusRule, y sin esos CRDs el sync de la Application principal falla
+    entero ("could not find monitoring.coreos.com/PrometheusRule"). ArgoCD pasa al render las
+    APIs del cluster destino.
+  */}}
+  {{- if and .Values.observability.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
   # Observabilidad Prometheus del participante: blackbox-exporter + Probe de sus Ingress,
   # PodMonitor de Patroni y las reglas criticas que tienen dato hoy.
   # El blackbox de la authority NO cubre esto: sus 20 targets son todos de prodauth, y un
