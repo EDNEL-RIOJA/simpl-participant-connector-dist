@@ -3,6 +3,14 @@ kind: ConfigMap
 metadata:
   name: {{ .Chart.Name }}-env-configmap
 data:
+  {{- /*
+    Perfil de Spring a partir de .Values.profile (como en la copia de simpl-participant-connector).
+    El chart publico lo documenta pero no lo emitia: tier1 arrancaba sin perfil participant y sin
+    sus rutas (p. ej. /auth hacia el Keycloak del participante, que daba 404), y ademas con las URLs
+    de una authority. Esas URLs solo van con profile: authority.
+  */}}
+  SPRING_PROFILES_ACTIVE: {{ .Values.profile | default "participant" | quote }}
+  {{- if eq (.Values.profile | default "participant") "authority" }}
   {{- with .Values.onboardingUrl }}
   ONBOARDING_URL: {{ tpl . $ | quote }}
   {{- end }}
@@ -17,6 +25,7 @@ data:
   {{- end }}
   {{- with .Values.consentManagementUrl }}
   CONSENT_MANAGEMENT_URL: {{ tpl . $ | quote }}
+  {{- end }}
   {{- end }}
 
 
