@@ -235,6 +235,30 @@ spec:
         # authority. Comprobado en caliente sobre stageaytopruebautom.
         - name: EDNEL_EMAIL_ASSET_BASE_URL
           value: "https://vallelengua.es"
+        # El entrypoint de la imagen Bitnami hace su PROPIA comprobacion de arranque con
+        # KEYCLOAK_DATABASE_* (convencion legacy propia de Bitnami), separada de KC_DB_URL
+        # (que SI genera bien el ConfigMap del chart a partir de externalDatabase.host).
+        # Sin esto, KEYCLOAK_DATABASE_HOST cae al default hardcodeado del script
+        # ("postgresql") y el pod se queda reintentando "cannot resolve host postgresql"
+        # para siempre, aunque KC_DB_URL apunte bien a pg-cluster. Visto en vivo en
+        # extletest/eks-external-rioja (libkeycloak.sh:299-306, keycloak_initialize()).
+        - name: KEYCLOAK_DATABASE_VENDOR
+          value: "postgresql"
+        - name: KEYCLOAK_DATABASE_HOST
+          value: "pg-cluster.{{ .Values.cluster.namespace }}.svc.cluster.local"
+        - name: KEYCLOAK_DATABASE_PORT
+          value: "5432"
+        - name: KEYCLOAK_DATABASE_NAME
+          value: "{{ .Values.namespaceTag.dataprovider }}_keycloak"
+        - name: KEYCLOAK_DATABASE_USER
+          value: "{{ .Values.namespaceTag.dataprovider }}_keycloak"
+        - name: KEYCLOAK_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              # Mismo Secret/clave que usa KC_DB_PASSWORD (lo crea este mismo chart a partir
+              # de externalDatabase.password, nombre fijo "<fullnameOverride>-externaldb").
+              name: keycloak-externaldb
+              key: db-password
         initContainers:
         - name: download-realm
           image: docker.io/curlimages/curl:8.18.0
