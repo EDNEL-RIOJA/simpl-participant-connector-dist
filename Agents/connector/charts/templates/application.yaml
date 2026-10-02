@@ -833,9 +833,12 @@ spec:
           {{- end }}
         {{- end }}
   # Tier 2 Gateway
-  - repoURL: https://code.europa.eu/api/v4/projects/860/packages/helm/stable
-    targetRevision: 2.13.0-rc.1242
-    chart: tier2-gateway
+  # Chart en vendor/ (el publico de code.europa.eu) para poder anotar el Service: el original
+  # solo pone las de external-dns, y en EKS el AWS Load Balancer Controller lo crea entonces como
+  # NLB INTERNO, con lo que tls-participant no es alcanzable desde fuera de la VPC.
+  - repoURL: {{ .Values.values.repo_URL }}
+    targetRevision: {{ .Values.values.branch }}
+    path: vendor/tier2-gateway
     helm:
       valueFiles:
         {{- range .Values.tier2_gateway.valueFiles }}
@@ -873,6 +876,13 @@ spec:
         {{- if ne . "public" }}
         lbNetwork: {{ . }}
         {{- end }}
+        {{- end }}
+        {{- if eq .Values.lbNetwork "cloud" }}
+        # Cloud (EKS): NLB publico. Sin esta anotacion el AWS Load Balancer Controller lo crea
+        # interno y tls-participant resuelve a una IP privada de la VPC.
+        service:
+          annotations:
+            service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
         {{- end }}
         {{- if $.Values.caTrust.enabled }}
         {{- include "connector.javaTrustValues" (dict "root" $ "chart" "tier2-gateway") | nindent 8 }}
