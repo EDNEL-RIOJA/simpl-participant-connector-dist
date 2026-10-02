@@ -143,12 +143,29 @@ spec:
           authorities: []
           consumers: []
           providers: []
+          # HIBRIDO (contract_consumer.enabled, el default salvo que se aplique el overlay
+          # values-role-provider.yaml/-consumer.yaml): este namespace corre a la vez una 2a
+          # instancia de contract (consumer) y contract-consumption-be/edc-connector-adapter
+          # en modo consumer, que necesitan sus propios campos en kafka-users-secret ademas
+          # de los ya cubiertos por kafkaParticipants.providers de abajo. Ver secrets.yaml.
+          {{- if .Values.contract_consumer.enabled }}
+          hybrids:
+            - {{ .Values.cluster.namespace }}
+          {{- else }}
+          hybrids: []
+          {{- end }}
         # El conector es su propio "common": se siembran las credenciales kafka
         # para este propio participante (provider).
         kafkaParticipants:
           consumers: []
           providers:
             - {{ .Values.cluster.namespace }}
+          {{- if .Values.contract_consumer.enabled }}
+          hybrids:
+            - {{ .Values.cluster.namespace }}
+          {{- else }}
+          hybrids: []
+          {{- end }}
         {{- if .Values.nodeSelector }}
         nodeSelector: {{- toYaml .Values.nodeSelector | nindent 10 }}
         {{- end }}
