@@ -32,6 +32,18 @@ spec:
       name: signer
       jsonPointers:
         - /spec/template/spec/containers/0/args
+    # Mismo caso que signer: el chart publicado de simpl-files (code.europa.eu/.../simpl-files)
+    # hardcodea los volumes/volumeMounts del Deployment (solo el PVC de documents, de solo
+    # lectura) sin ninguna clave de values para anadir otro. nginx corre como runAsUser: 101 y
+    # no puede escribir /tmp/nginx.pid -> CrashLoopBackOff. Se parchea a mano un emptyDir
+    # montado en /tmp y se ignora aqui para que selfHeal no lo revierta. Visto en vivo en
+    # extletest/eks-external-rioja.
+    - group: apps
+      kind: Deployment
+      name: simpl-files
+      jsonPointers:
+        - /spec/template/spec/volumes
+        - /spec/template/spec/containers/0/volumeMounts
   project: {{ .Values.project }}
   destination:
     server: {{ .Values.cluster.address }}
