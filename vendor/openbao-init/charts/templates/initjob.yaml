@@ -135,7 +135,9 @@ spec:
 
                 echo "OpenBao is sealed. Unsealing with 3 keys from /data/init.json..."
                 # The openbao image has no jq; parse with grep/sed (extracts the first 3 keys from the b64 array)
-                KEYS=$(grep -o '"unseal_keys_b64":\[[^]]*\]' /data/init.json | sed 's/"unseal_keys_b64":\[//;s/\]//;s/"//g;s/,/ /g')
+                # bao operator init escribe el JSON en varias lineas ("unseal_keys_b64": [ ...): se aplana
+                # antes, o el grep no encuentra nada y no se aplica ninguna clave.
+                KEYS=$(tr -d ' \t\r\n' < /data/init.json | grep -o '"unseal_keys_b64":\[[^]]*\]' | sed 's/"unseal_keys_b64":\[//;s/\]//;s/"//g;s/,/ /g')
                 idx=0
                 for KEY in ${KEYS}; do
                   idx=$((idx + 1))
