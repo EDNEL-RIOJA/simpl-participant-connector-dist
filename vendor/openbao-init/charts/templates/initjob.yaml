@@ -66,7 +66,7 @@ spec:
             - name: init-bao-volume
               mountPath: /data
           - name: 1-bao-secret
-            image: "docker.io/rancher/kubectl:v1.35.2"
+            image: "docker.io/alpine/k8s:1.35.2"
             command: [sh, -c]
             args:
               - |
@@ -417,7 +417,7 @@ spec:
                     key: ca.crt
                     optional: true
           - name: 7-sync-kafka-users-secret
-            image: "docker.io/rancher/kubectl:v1.35.2"
+            image: "docker.io/alpine/k8s:1.35.2"
             command: [sh, -c]
             args:
               - |
@@ -446,7 +446,7 @@ spec:
           # changed. The restart is fire-and-forget so PostSync stays fast;
           # kafka rolls in the background.
           - name: 7b-rollout-kafka-on-change
-            image: "docker.io/rancher/kubectl:v1.35.2"
+            image: "docker.io/alpine/k8s:1.35.2"
             command: [sh, -c]
             args:
               - |
@@ -473,7 +473,7 @@ spec:
                   --dry-run=client -o yaml | kubectl apply -f -
                 echo "kafka restart triggered; not waiting for completion"
           - name: 8-sync-redis-secrets
-            image: "docker.io/rancher/kubectl:v1.35.2"
+            image: "docker.io/alpine/k8s:1.35.2"
             command: [sh, -c]
             args:
               - |
@@ -517,7 +517,7 @@ spec:
           # Because the K8s Secret is no longer rendered by Helm, it never
           # rotates on every reconcile.
           - name: 9-sync-mailpit-secrets
-            image: "docker.io/rancher/kubectl:v1.35.2"
+            image: "docker.io/alpine/k8s:1.35.2"
             command: [sh, -c]
             args:
               - |
