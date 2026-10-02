@@ -91,7 +91,12 @@ openbao_init:
   chart_name: openbao-init
 vault_webhook:
   repo_URL: https://github.com/bank-vaults/vault-secrets-webhook.git
-  targetRevision: main
+  # Fijado: con main el chart trae la imagen :latest, que desde v1.23 rechaza mutar pods cuya
+  # anotacion vault-addr no este en VAULT_ADDR_ALLOWLIST ("not in the configured allowlist"), y
+  # entonces ningun pod recibe vault-env y todos los vault:... llegan literales. v1.22.2 es la
+  # version que corre on-prem.
+  targetRevision: v1.22.2
+  webhookImageTag: v1.22.2
   path: deploy/charts/vault-secrets-webhook
   image:
     registry: docker.io

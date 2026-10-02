@@ -87,6 +87,9 @@ spec:
         certificate:
           generate: false
           useCertManager: true
+        image:
+          # El Chart.yaml del webhook dice appVersion: latest; sin fijarlo la imagen va a :latest.
+          tag: {{ .Values.vault_webhook.webhookImageTag | quote }}
         vaultEnv:
           repository: "ghcr.io/bank-vaults/vault-env"
           tag: "1.22.1"
