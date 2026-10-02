@@ -55,10 +55,13 @@ spec:
     targetRevision: {{ .Values.vault_webhook.targetRevision }}
     path: {{ .Values.vault_webhook.path }}
     helm:
+      {{- /* Sin valueFiles no se emite la clave: vacia queda en null y la API rechaza la Application. */}}
+      {{- with .Values.vault_webhook.valueFiles }}
       valueFiles:
-        {{- range .Values.vault_webhook.valueFiles }}
+        {{- range . }}
         - $values/app-values/vault-webhook/{{ . }}
         {{- end }}
+      {{- end }}
       values: |
         watchNamespace: {{ .Values.cluster.namespace }}
         fullnameOverride: vault-webhook-{{ .Values.cluster.namespace }}
