@@ -128,6 +128,10 @@ spec:
           password: vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-postgres-passwords#{{ .Values.cluster.namespace }}-keycloak
         realmHardening:
           enabled: true
+          # Default del chart: quay.io/keycloak/keycloak:26.3.2 (oficial, sin curl/bash) ->
+          # "curl: command not found" en el Job, bucle infinito. Misma imagen bitnamilegacy que
+          # el pod principal (si tiene curl+bash). Visto en vivo en extletest/eks-external-rioja.
+          image: "docker.io/bitnamilegacy/keycloak:26.3.2-debian-12-r2"
           keycloakUrl: "http://keycloak.{{ .Values.cluster.namespace }}.svc.cluster.local"
           adminUser: "admin"
           adminPassword: "vault:{{ .Values.secrets.secretEngine }}/data/{{ .Values.cluster.namespace }}-keycloak#admin"
