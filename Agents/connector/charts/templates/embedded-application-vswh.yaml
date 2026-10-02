@@ -92,6 +92,17 @@ spec:
           VAULT_ENV_VAULT_ADDR: "http://openbao-{{ .Values.cluster.namespace }}.{{ .Values.cluster.namespace }}.svc.cluster.local:8200"
           VAULT_ROLE: "{{ .Values.secrets.secretEngine }}-role"
           VAULT_IMAGE: "{{ .Values.vault_webhook.image.repository }}:{{ .Values.vault_webhook.image.tag }}"
+          # El webhook rechaza (silenciosamente: failurePolicy=Ignore, el pod arranca SIN
+          # mutar) cualquier vault.security.banzaicloud.io/vault-addr que no este en esta
+          # lista. La mayoria de los pods del participante (Keycloak, contract, etc.) piden
+          # el host PUBLICO de OpenBao (vault-addr: https://secrets-<common>.<dominio>), no
+          # el Service interno de VAULT_ADDR de arriba. Sin este allowlist, el error queda
+          # solo en los logs del propio webhook ("address ... is not in the configured
+          # allowlist") y el pod sigue con el valor LITERAL "vault:..." como si fuera la
+          # password/secreto real — visto en vivo en extletest/eks-external-rioja
+          # (Keycloak: "password authentication failed for user ..." con la cadena
+          # vault:simpl-secrets/... sin resolver).
+          VAULT_ADDR_ALLOWLIST: "http://openbao-{{ .Values.cluster.namespace }}.{{ .Values.cluster.namespace }}.svc.cluster.local:8200,https://secrets-{{ .Values.namespaceTag.common }}.{{ include "connector.internalDomain" $ }}"
         {{- if eq .Values.resourcePreset "low" }}
         resources:
           requests:
